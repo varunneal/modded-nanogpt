@@ -840,6 +840,7 @@ def find_batch_starts(tokens: Tensor, pos: int, seq_len: int, token_window: int)
 
 
 def distributed_data_generator(filename_pattern: str, seq_len: int, grad_accum_steps: int, align_to_bos: bool):
+    print0(f"[distributed data generator] grad_accum_steps: {grad_accum_steps}", console=True)
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     batch_size = seq_len * world_size
