@@ -1074,11 +1074,13 @@ for step in range(train_steps + 1):
         break
 
     # --------------- TRAINING SECTION -----------------
+    if step <= 1:
+        print0(f"step:{step}", console=True)
     for _ in range(grad_accum_steps):
         inputs, targets = next(train_loader)
         model(inputs, targets, get_window_size_blocks(step)).backward()
-        if step == 0:
-            print(inputs.shape)
+        if step <= 1:
+            print0(f"[step {step}] input shape is{inputs.shape}", console=True)
     # set optimization hyperparameters
     for opt in optimizers:
         for group in opt.param_groups:
