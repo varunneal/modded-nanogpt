@@ -973,15 +973,11 @@ def get_lr(step: int):
         return w * 1.0 + (1 - w) * 0.1
 
 
-# attention window size schedule: linearly increase
-@lru_cache(1)
-def get_window_size_blocks_helper(window_size: int):
-    return torch.tensor(window_size // 128, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-
-
+ws_schedule = (3, 7, 11)
 def get_window_size_blocks(step: int):
     x = step / args.num_iterations  # progress in training
     assert 0 <= x <= 1
+    return torch.tensor(ws_schedule[int(x * len(ws_schedule))], dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
     # Linearly increase the block-wise sliding window size over training 128 -> 1792
     # increase by @fernbear.bsky.social; block-wise by @YouJiacheng
     window_size = next_multiple_of_n(1728 * x, n=128)
@@ -1071,6 +1067,8 @@ for step in range(train_steps + 1):
     for _ in range(24 * grad_accum_steps):
         inputs, targets = next(train_loader)
         model(inputs, targets, get_window_size_blocks(step)).backward()
+    if step % 100 == 0:
+        print0(f"[Step {step}] window size is {get_window_size_blocks(step).item()}")
     # set optimization hyperparameters
     for opt in optimizers:
         for group in opt.param_groups:
