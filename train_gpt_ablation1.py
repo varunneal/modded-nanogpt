@@ -1014,7 +1014,7 @@ print0(f"Train loader being generated w seq_len {args.train_seq_len // 24} and g
 train_loader = distributed_data_generator(args.train_files, args.train_seq_len // 24, 24 * grad_accum_steps, align_to_bos=True)
 for _ in range(warmup_steps):
     inputs, targets = next(train_loader)
-    print0(f"[warmup] input shape is {inputs.shape}")
+    print0(f"[warmup] input is {inputs.cpu().numpy()[:10]}", console=True)
     model(inputs, targets, get_window_size_blocks(1)).backward()
     for opt in optimizers:
         opt.step()
