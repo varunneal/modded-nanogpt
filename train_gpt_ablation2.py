@@ -693,7 +693,6 @@ class Block(nn.Module):
 def next_multiple_of_n(v: float | int, *, n: int):
     return next(x for x in range(n, int(v) + 1 + n, n) if x >= v)
 
-
 class GPT(nn.Module):
     def __init__(self, vocab_size: int, num_layers: int, num_heads: int, model_dim: int, max_seq_len: int):
         super().__init__()
@@ -728,9 +727,12 @@ class GPT(nn.Module):
 
     def create_blockmasks(self, input_seq: Tensor, sliding_window_num_blocks: Tensor):
         BLOCK_SIZE = 128
+        docs = (input_seq == 50256).cumsum(0)
 
-        def causal_mask_fn(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
+        def document_causal(b, h, q_idx, kv_idx):
+            causal_mask = q_idx >= kv_idx
+            document_mask = docs[q_idx] == docs[kv_idx]
+            return causal_mask & document_mask
 
         def dense_to_ordered(dense_blockmask: Tensor):
             num_blocks = dense_blockmask.sum(dim=-1, dtype=torch.int32)
@@ -743,11 +745,12 @@ class GPT(nn.Module):
         block_idx = torch.arange(NUM_BLOCKS, dtype=torch.int32, device="cuda")
         causal_blockmask_any = block_idx[:, None] >= block_idx
         causal_blockmask_all = block_idx[:, None] > block_idx
-
-        # For pure causal masking: partial = same block, full = strictly previous blocks
-        blockmask_any = causal_blockmask_any
-        blockmask_all = causal_blockmask_all
-
+        docs_low = docs.view(-1, BLOCK_SIZE)[:, 0].contiguous()
+        docs_high = docs.view(-1, BLOCK_SIZE)[:, -1].contiguous()
+        document_blockmask_any = (docs_low[:, None] <= docs_high) & (docs_high[:, None] >= docs_low)
+        document_blockmask_all = (docs_low[:, None] == docs_high) & (docs_high[:, None] == docs_low)
+        blockmask_any = causal_blockmask_any & document_blockmask_any
+        blockmask_all = causal_blockmask_all & document_blockmask_all
         partial_kv_num_blocks, partial_kv_indices = dense_to_ordered(blockmask_any & ~blockmask_all)
         full_kv_num_blocks, full_kv_indices = dense_to_ordered(blockmask_all)
 
@@ -758,10 +761,10 @@ class GPT(nn.Module):
                 torch.clamp_max(full_kv_num_blocks, window_size_blocks - 1),
                 full_kv_indices,
                 BLOCK_SIZE=BLOCK_SIZE,
-                mask_mod=causal_mask_fn,
+                mask_mod=document_causal,
             )
 
-        # Long-short SWA block masks by @leloykun & @YouJiacheng, adapted from suggestion by @Grad62304977, following Gemma 2 paper
+        # Long-short SWA block masks by @leloykun & @YouJiacheng, adapated from suggestion by @Grad62304977, following Gemma 2 paper
         return build_bm(sliding_window_num_blocks), build_bm(sliding_window_num_blocks // 2)
 
     def forward(self, input_seq: Tensor, target_seq: Tensor, sliding_window_num_blocks: Tensor):
@@ -978,10 +981,7 @@ def get_window_size_blocks(step: int):
     x = step / (1 + args.num_iterations)  # progress in training
     assert 0 <= x <= 1
     return torch.tensor(ws_schedule[int(x * len(ws_schedule))], dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-    # Linearly increase the block-wise sliding window size over training 128 -> 1792
-    # increase by @fernbear.bsky.social; block-wise by @YouJiacheng
-    window_size = next_multiple_of_n(1728 * x, n=128)
-    return get_window_size_blocks_helper(window_size)
+
 
 
 model: nn.Module = torch.compile(model, dynamic=False, fullgraph=True)
@@ -1067,8 +1067,7 @@ for step in range(train_steps + 1):
     for _ in range(24 * grad_accum_steps):
         inputs, targets = next(train_loader)
         model(inputs, targets, get_window_size_blocks(step)).backward()
-    if step % 100 == 0:
-        print0(f"[Step {step}] window size is {get_window_size_blocks(step).item()}")
+
     # set optimization hyperparameters
     for opt in optimizers:
         for group in opt.param_groups:
