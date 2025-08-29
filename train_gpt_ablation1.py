@@ -1077,7 +1077,7 @@ for step in range(train_steps + 1):
     # --------------- TRAINING SECTION -----------------
     if step <= 1:
         print0(f"step:{step}", console=True)
-    for _ in range(grad_accum_steps):
+    for _ in range(24 * grad_accum_steps):
         inputs, targets = next(train_loader)
         model(inputs, targets, get_window_size_blocks(step)).backward()
         if step <= 1:
