@@ -1070,7 +1070,7 @@ for step in range(train_steps + 1):
         break
 
     # --------------- TRAINING SECTION -----------------
-    for _ in range(grad_accum_steps):
+    for _ in range(24 * grad_accum_steps):
         inputs, targets = next(train_loader)
         model(inputs, targets, get_window_size_blocks(step)).backward()
     # set optimization hyperparameters

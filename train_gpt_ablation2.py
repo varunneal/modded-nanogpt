@@ -1006,7 +1006,6 @@ initial_state = dict(model=copy.deepcopy(model.state_dict()),
 ## - train_seq_len: 2 * 1024
 ## - grad_accum_steps 24 * (8 // world_size)
 
-print0(f"Train loader being generatoed w seq_len {args.train_seq_len // 24} and grad_accum_steps {24 * grad_accum_steps}.", console=True)
 train_loader = distributed_data_generator(args.train_files, args.train_seq_len // 24, 24 * grad_accum_steps, align_to_bos=True)
 for _ in range(warmup_steps):
     inputs, targets = next(train_loader)
@@ -1069,7 +1068,7 @@ for step in range(train_steps + 1):
         break
 
     # --------------- TRAINING SECTION -----------------
-    for _ in range(grad_accum_steps):
+    for _ in range(24 * grad_accum_steps):
         inputs, targets = next(train_loader)
         model(inputs, targets, get_window_size_blocks(step)).backward()
     # set optimization hyperparameters
