@@ -840,7 +840,6 @@ def find_batch_starts(tokens: Tensor, pos: int, seq_len: int, token_window: int)
 
 
 def distributed_data_generator(filename_pattern: str, seq_len: int, grad_accum_steps: int, align_to_bos: bool):
-    print0(f"[distributed data generator] grad_accum_steps: {grad_accum_steps}", console=True)
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     batch_size = seq_len * world_size
@@ -1015,7 +1014,6 @@ print0(f"Train loader being generated w seq_len {args.train_seq_len // 24} and g
 train_loader = distributed_data_generator(args.train_files, args.train_seq_len // 24, 24 * grad_accum_steps, align_to_bos=True)
 for _ in range(warmup_steps):
     inputs, targets = next(train_loader)
-    print0(f"[warmup] input is {inputs.cpu().numpy()[:10]}", console=True)
     model(inputs, targets, get_window_size_blocks(1)).backward()
     for opt in optimizers:
         opt.step()
@@ -1075,13 +1073,9 @@ for step in range(train_steps + 1):
         break
 
     # --------------- TRAINING SECTION -----------------
-    if step <= 1:
-        print0(f"step:{step}", console=True)
     for _ in range(24 * grad_accum_steps):
         inputs, targets = next(train_loader)
         model(inputs, targets, get_window_size_blocks(step)).backward()
-        if step <= 1:
-            print0(f"[step {step}] input shape is{inputs.shape}", console=True)
     # set optimization hyperparameters
     for opt in optimizers:
         for group in opt.param_groups:
