@@ -975,7 +975,7 @@ def get_lr(step: int):
 
 ws_schedule = (3, 7, 11)
 def get_window_size_blocks(step: int):
-    x = step / args.num_iterations  # progress in training
+    x = step / (1 + args.num_iterations)  # progress in training
     assert 0 <= x <= 1
     return torch.tensor(ws_schedule[int(x * len(ws_schedule))], dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
     # Linearly increase the block-wise sliding window size over training 128 -> 1792
