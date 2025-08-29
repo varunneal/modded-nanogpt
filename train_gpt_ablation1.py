@@ -1077,6 +1077,8 @@ for step in range(train_steps + 1):
     for _ in range(grad_accum_steps):
         inputs, targets = next(train_loader)
         model(inputs, targets, get_window_size_blocks(step)).backward()
+        if step == 0:
+            print(inputs.shape)
     # set optimization hyperparameters
     for opt in optimizers:
         for group in opt.param_groups:
