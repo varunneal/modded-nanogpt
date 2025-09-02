@@ -1011,7 +1011,7 @@ for step in range(train_steps + 1):
         training_time_ms += 1000 * (time.perf_counter() - t0)
         model.eval()
         assert args.val_tokens % args.val_batch_size == 0
-        val_steps = args.val_tokens // args.val_batch_size
+        val_steps = args.val_tokens // (args.val_batch_size * grad_accum_steps)
         val_loader = distributed_data_generator(args.val_files, args.val_batch_size, -1, grad_accum_steps=grad_accum_steps, align_to_bos=False)
         val_loss = 0
         with torch.no_grad():
