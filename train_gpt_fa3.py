@@ -965,7 +965,7 @@ def get_ws(step: int):
     ws_idx = int(len(args.ws_schedule) * x)
     return args.ws_schedule[ws_idx]
 
-model: nn.Module = torch.compile(model, dynamic=False, fullgraph=True)
+model: nn.Module = torch.compile(model, dynamic=False, fullgraph=False)
 
 ########################################
 #            Warmup kernels            #
