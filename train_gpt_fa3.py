@@ -789,7 +789,7 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
     # align_to_bos: each sequence begins with Beginning of Sequence token, sequences truncated to max_seq_len
     rank = dist.get_rank() if dist.is_initialized() else 0
     world_size = dist.get_world_size() if dist.is_initialized() else 1
-    num_minibatches = world_size * grad_accum_steps
+    num_minibatches = world_size * grad_accum_steps  # expected to be 8; may work for other values
     assert num_tokens % (num_minibatches) == 0, "Batch size must be divisible by world size"
 
 
@@ -843,7 +843,7 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
             _targets.to(device="cuda", dtype=torch.int64, non_blocking=True),
             _cum_lengths.to(device="cuda", dtype=torch.int32, non_blocking=True)
         )
-        rank += world_size
+        rank = (rank + world_size) % (num_minibatches)
 
         if new_params is not None:
             # makes it possible for generator to receive new (num_tokens, max_seq_len) via .send()
