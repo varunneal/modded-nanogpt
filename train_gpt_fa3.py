@@ -568,7 +568,7 @@ class Rotary(nn.Module):
         self.sin = nn.Buffer(theta.sin(), persistent=False)
 
     def forward(self, x_BTHD: Tensor):
-        assert self.cos.size(0) >= x_BTHD.size(-3)
+        assert self.cos.size(0) >= x_BTHD.size(-3), f"max_seq_len is {self.cos.size(0)} but input has lenght {x_BTHD.size(-3)}"
         cos, sin = self.cos[None, :x_BTHD.size(-3), None, :], self.sin[None, :x_BTHD.size(-3), None, :]
         x1, x2 = x_BTHD.to(dtype=torch.float32).chunk(2, dim=-1)
         y1 = x1 * cos + x2 * sin
