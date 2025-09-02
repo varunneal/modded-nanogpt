@@ -925,7 +925,7 @@ model: nn.Module = GPT(
     num_layers=12,
     num_heads=6,
     model_dim=768,
-    max_seq_len=max(args.train_max_seq_len, args.val_batch_size)
+    max_seq_len=max(args.train_batch_size, args.val_batch_size)
 ).cuda()
 for m in model.modules():
     if isinstance(m, nn.Embedding):
@@ -965,7 +965,7 @@ def get_ws(step: int):
     ws_idx = int(len(args.ws_schedule) * x)
     return args.ws_schedule[ws_idx]
 
-model: nn.Module = torch.compile(model, dynamic=False, fullgraph=False)
+model: nn.Module = torch.compile(model, dynamic=False, fullgraph=True)
 
 ########################################
 #            Warmup kernels            #
