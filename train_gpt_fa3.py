@@ -784,11 +784,12 @@ class BOSFinder:
 
         return starts, ends
 
-def distributed_data_generator(filename_pattern: str, num_tokens: int, max_seq_len: int, align_to_bos: bool = True):
+def distributed_data_generator(filename_pattern: str, num_tokens: int,
+                               max_seq_len: int, grad_accum_steps: int = 1, align_to_bos: bool = True):
     # align_to_bos: each sequence begins with Beginning of Sequence token, sequences truncated to max_seq_len
     rank = dist.get_rank() if dist.is_initialized() else 0
     world_size = dist.get_world_size() if dist.is_initialized() else 1
-    assert num_tokens % world_size == 0, "Batch size must be divisible by world size"
+    assert num_tokens % (world_size * grad_accum_steps) == 0, "Batch size must be divisible by world size"
 
     files = [Path(file) for file in sorted(glob.glob(filename_pattern))]
     if not files:
@@ -800,7 +801,7 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int, max_seq_l
     pos = 0  # for unaligned case
 
     while True:
-        num_tokens_local = num_tokens // world_size
+        num_tokens_local = num_tokens // world_size // grad_accum_steps
         max_num_docs = next_multiple_of_n(num_tokens_local // 400, n=128)  # median doc length is ~400
 
         if align_to_bos:
@@ -975,7 +976,7 @@ model: nn.Module = torch.compile(model, dynamic=False, fullgraph=True)
 warmup_steps = 15
 initial_state = dict(model=copy.deepcopy(model.state_dict()),
                      optimizers=[copy.deepcopy(opt.state_dict()) for opt in optimizers]) # save the initial state
-train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len)
+train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len, grad_accum_steps=grad_accum_steps)
 for step in range(warmup_steps):
     inputs, targets, cum_seqlens = next(train_loader)
     print(f"Inputs shape {inputs.shape}; seqlens shape {cum_seqlens.shape}")
@@ -993,7 +994,7 @@ del train_loader, initial_state
 #        Training and validation       #
 ########################################
 
-train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len)
+train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len, grad_accum_steps=grad_accum_steps)
 training_time_ms = 0
 # start the clock
 torch.cuda.synchronize()
@@ -1011,7 +1012,7 @@ for step in range(train_steps + 1):
         model.eval()
         assert args.val_tokens % args.val_batch_size == 0
         val_steps = args.val_tokens // args.val_batch_size
-        val_loader = distributed_data_generator(args.val_files, args.val_batch_size, -1, align_to_bos=False)
+        val_loader = distributed_data_generator(args.val_files, args.val_batch_size, -1, grad_accum_steps=grad_accum_steps, align_to_bos=False)
         val_loss = 0
         with torch.no_grad():
             for _ in range(val_steps):
