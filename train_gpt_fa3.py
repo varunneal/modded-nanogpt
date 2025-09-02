@@ -843,7 +843,7 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int, max_seq_l
         )
 
         if new_params is not None:
-            # makes it possible for generator to recieve new (num_tokens, max_seq_len) via .send()
+            # makes it possible for generator to receive new (num_tokens, max_seq_len) via .send()
             new_num_tokens, new_max_seq_len = new_params
             assert new_num_tokens % world_size == 0, "Num tokens must be divisible by world size"
             num_tokens = new_num_tokens
@@ -978,6 +978,7 @@ initial_state = dict(model=copy.deepcopy(model.state_dict()),
 train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len)
 for step in range(warmup_steps):
     inputs, targets, cum_seqlens = next(train_loader)
+    print(f"Inputs shape {inputs.shape}; seqlens shape {cum_seqlens.shape}")
     ws = args.ws_schedule[step % len(args.ws_schedule)]  # each window size is a new graph, need to warm up each
     model(inputs, targets, cum_seqlens, ws).backward()
     for opt in optimizers:
