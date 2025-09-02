@@ -1017,8 +1017,11 @@ for step in range(train_steps + 1):
         val_loader = distributed_data_generator(args.val_files, args.val_batch_size, -1, grad_accum_steps=grad_accum_steps, align_to_bos=False)
         val_loss = 0
         with torch.no_grad():
+            print(f"Validation in {val_steps} steps")
             for _ in range(val_steps):
                 inputs, targets, cum_seqlens = next(val_loader)
+                if step == 0:
+                    print(f"Inputs shape {inputs.shape}; seqlens shape {cum_seqlens.shape}")
                 val_loss += model(inputs, targets, cum_seqlens, args.val_ws)
         val_loss /= val_steps
         del val_loader
