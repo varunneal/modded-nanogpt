@@ -769,7 +769,7 @@ class BOSFinder:
             cur_len = 0
             while cur_len <= num_tokens_local:
                 if idx >= n:
-                    raise StopIteration("Insufficient BOS ahead; hit tail of shard.")
+                    raise StopIteration(f"Insufficient BOS ahead of position {cur_len}; hit tail of shard.")
                 cur = self.bos_idx[idx]
                 starts[r].append(cur)
                 end = min(self.bos_idx[idx + 1] if idx + 1 < n else self.size,
