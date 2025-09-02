@@ -752,20 +752,20 @@ BOS_ID = 50256
 
 class BOSFinder:
     # Helper for getting sequences that start at the beginning of documents by @varunneal based on work by @classiclarryd
-    def __init__(self, tokens: Tensor, num_minibatches: int = 1):
+    def __init__(self, tokens: Tensor, world_size: int = 1):
         # Precompute BOS positions once per shard
         self.size = tokens.numel()
         self.bos_idx = (tokens == BOS_ID).nonzero(as_tuple=True)[0].to(torch.int64).cpu().numpy()
         self.i = 0
-        self.num_minibatches = num_minibatches
+        self.world_size = world_size
 
     def next_batch(self, num_tokens_local: int, max_seq_len: int):
         n = len(self.bos_idx)
-        starts = [[] for _ in range(self.num_minibatches)]
-        ends = [[] for _ in range(self.num_minibatches)]
+        starts = [[] for _ in range(self.world_size)]
+        ends = [[] for _ in range(self.world_size)]
 
         idx = self.i
-        for r in range(self.num_minibatches):
+        for r in range(self.world_size):
             cur_len = 0
             while cur_len <= num_tokens_local:
                 if idx >= n:
@@ -786,12 +786,11 @@ class BOSFinder:
         return starts, ends
 
 def distributed_data_generator(filename_pattern: str, num_tokens: int,
-                               max_seq_len: int, grad_accum_steps: int = 1, align_to_bos: bool = True):
+                               max_seq_len: int, align_to_bos: bool = True):
     # align_to_bos: each sequence begins with Beginning of Sequence token, sequences truncated to max_seq_len
     rank = dist.get_rank() if dist.is_initialized() else 0
     world_size = dist.get_world_size() if dist.is_initialized() else 1
-    num_minibatches = world_size * grad_accum_steps  # expected to be 8; may work for other values
-    assert num_tokens % (num_minibatches) == 0, "Batch size must be divisible by world size"
+    assert num_tokens % (world_size) == 0, "Batch size must be divisible by world size"
 
 
     files = [Path(file) for file in sorted(glob.glob(filename_pattern))]
@@ -800,11 +799,11 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
 
     file_iter = iter(files)  # Use itertools.cycle(files) for multi-epoch training
     tokens = _load_data_shard(next(file_iter))
-    finder = BOSFinder(tokens, num_minibatches=num_minibatches) if align_to_bos else None
+    finder = BOSFinder(tokens, world_size=world_size) if align_to_bos else None
     pos = 0  # for unaligned case
 
     while True:
-        num_tokens_local = num_tokens // num_minibatches
+        num_tokens_local = num_tokens // world_size
         max_num_docs = next_multiple_of_n(num_tokens_local // 300, n=128)  # median doc length is ~400
 
         if align_to_bos:
@@ -814,7 +813,7 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
             except StopIteration:
                 # This shard is exhausted, load the next one in the next loop iteration.
                 tokens = _load_data_shard(next(file_iter))
-                finder = BOSFinder(tokens, num_minibatches=num_minibatches)
+                finder = BOSFinder(tokens, world_size=world_size)
                 continue
 
             buf = torch.cat([tokens[i:j] for i, j in zip(start_idxs, end_idxs)])
@@ -844,12 +843,11 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
             _targets.to(device="cuda", dtype=torch.int64, non_blocking=True),
             _cum_lengths.to(device="cuda", dtype=torch.int32, non_blocking=True)
         )
-        rank = (rank + world_size) % (num_minibatches)
 
         if new_params is not None:
             # makes it possible for generator to receive new (num_tokens, max_seq_len) via .send()
             new_num_tokens, new_max_seq_len = new_params
-            assert new_num_tokens % num_minibatches == 0, "Num tokens must be divisible by world size"
+            assert new_num_tokens % world_size == 0, "Num tokens must be divisible by world size"
             num_tokens = new_num_tokens
             max_seq_len = new_max_seq_len
 
@@ -979,7 +977,7 @@ model: nn.Module = torch.compile(model, dynamic=False, fullgraph=True)
 warmup_steps = 15
 initial_state = dict(model=copy.deepcopy(model.state_dict()),
                      optimizers=[copy.deepcopy(opt.state_dict()) for opt in optimizers]) # save the initial state
-train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len, grad_accum_steps=grad_accum_steps)
+train_loader = distributed_data_generator(args.train_files, args.train_batch_size // grad_accum_steps, args.train_max_seq_len)
 for step in range(warmup_steps):
     inputs, targets, cum_seqlens = next(train_loader)
     print(f"Inputs shape {inputs.shape}; seqlens shape {cum_seqlens.shape}")
@@ -997,7 +995,7 @@ del train_loader, initial_state
 #        Training and validation       #
 ########################################
 
-train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len, grad_accum_steps=grad_accum_steps)
+train_loader = distributed_data_generator(args.train_files, args.train_batch_size // grad_accum_steps, args.train_max_seq_len)
 training_time_ms = 0
 # start the clock
 torch.cuda.synchronize()
@@ -1015,7 +1013,7 @@ for step in range(train_steps + 1):
         model.eval()
         assert args.val_tokens % args.val_batch_size == 0
         val_steps = grad_accum_steps * args.val_tokens // args.val_batch_size
-        val_loader = distributed_data_generator(args.val_files, args.val_batch_size, -1, grad_accum_steps=grad_accum_steps, align_to_bos=False)
+        val_loader = distributed_data_generator(args.val_files, args.val_batch_size // grad_accum_steps, -1, align_to_bos=False)
         val_loss = 0
         with torch.no_grad():
             print(f"Validation in {val_steps} steps")
