@@ -823,7 +823,7 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
             cum_lengths = (end_idxs - start_idxs).cumsum(0)
 
         else:
-            if pos + num_tokens + 1 >= len(tokens):
+            if pos + num_tokens + 1 >= len(tokens):  # should not occur for val data
                 tokens, pos = _load_data_shard(next(file_iter)), 0
 
             pos_local = pos + rank * num_tokens_local
@@ -833,6 +833,7 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
 
             cum_lengths = torch.nonzero(_inputs == BOS_ID)[:, 0]
             pos += num_tokens
+
 
         _cum_lengths = torch.full((max_num_docs,), num_tokens_local)
         _cum_lengths[0] = 0
@@ -874,7 +875,7 @@ class Hyperparameters:
     # attention masking
     block_size: int = 128
     ws_schedule: tuple = (3, 7, 11)
-    val_ws: int = 17
+    val_ws: int = 11
 
 args = Hyperparameters()
 
