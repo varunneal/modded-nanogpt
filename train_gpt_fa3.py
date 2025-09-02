@@ -752,20 +752,20 @@ BOS_ID = 50256
 
 class BOSFinder:
     # Helper for getting sequences that start at the beginning of documents by @varunneal based on work by @classiclarryd
-    def __init__(self, tokens: Tensor, world_size: int = 1):
+    def __init__(self, tokens: Tensor, num_minibatches: int = 1):
         # Precompute BOS positions once per shard
         self.size = tokens.numel()
         self.bos_idx = (tokens == BOS_ID).nonzero(as_tuple=True)[0].to(torch.int64).cpu().numpy()
         self.i = 0
-        self.world_size = world_size
+        self.num_minibatches = num_minibatches
 
     def next_batch(self, num_tokens_local: int, max_seq_len: int):
         n = len(self.bos_idx)
-        starts = [[] for _ in range(self.world_size)]
-        ends = [[] for _ in range(self.world_size)]
+        starts = [[] for _ in range(self.num_minibatches)]
+        ends = [[] for _ in range(self.num_minibatches)]
 
         idx = self.i
-        for r in range(self.world_size):
+        for r in range(self.num_minibatches):
             cur_len = 0
             while cur_len <= num_tokens_local:
                 if idx >= n:
@@ -789,7 +789,9 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
     # align_to_bos: each sequence begins with Beginning of Sequence token, sequences truncated to max_seq_len
     rank = dist.get_rank() if dist.is_initialized() else 0
     world_size = dist.get_world_size() if dist.is_initialized() else 1
-    assert num_tokens % (world_size * grad_accum_steps) == 0, "Batch size must be divisible by world size"
+    num_minibatches = world_size * grad_accum_steps
+    assert num_tokens % (num_minibatches) == 0, "Batch size must be divisible by world size"
+
 
     files = [Path(file) for file in sorted(glob.glob(filename_pattern))]
     if not files:
@@ -797,11 +799,11 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
 
     file_iter = iter(files)  # Use itertools.cycle(files) for multi-epoch training
     tokens = _load_data_shard(next(file_iter))
-    finder = BOSFinder(tokens, world_size=world_size) if align_to_bos else None
+    finder = BOSFinder(tokens, num_minibatches=num_minibatches) if align_to_bos else None
     pos = 0  # for unaligned case
 
     while True:
-        num_tokens_local = num_tokens // world_size // grad_accum_steps
+        num_tokens_local = num_tokens // num_minibatches
         max_num_docs = next_multiple_of_n(num_tokens_local // 300, n=128)  # median doc length is ~400
 
         if align_to_bos:
@@ -810,8 +812,8 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
                 start_idxs, end_idxs = torch.tensor(seq_starts[rank]), torch.tensor(seq_ends[rank])
             except StopIteration:
                 # This shard is exhausted, load the next one in the next loop iteration.
-                tokens, pos = _load_data_shard(next(file_iter)), 0
-                finder = BOSFinder(tokens, world_size=world_size)
+                tokens = _load_data_shard(next(file_iter))
+                finder = BOSFinder(tokens, num_minibatches=num_minibatches)
                 continue
 
             buf = torch.cat([tokens[i:j] for i, j in zip(start_idxs, end_idxs)])
@@ -841,11 +843,12 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
             _targets.to(device="cuda", dtype=torch.int64, non_blocking=True),
             _cum_lengths.to(device="cuda", dtype=torch.int32, non_blocking=True)
         )
+        rank += world_size
 
         if new_params is not None:
             # makes it possible for generator to receive new (num_tokens, max_seq_len) via .send()
             new_num_tokens, new_max_seq_len = new_params
-            assert new_num_tokens % world_size == 0, "Num tokens must be divisible by world size"
+            assert new_num_tokens % num_minibatches == 0, "Num tokens must be divisible by world size"
             num_tokens = new_num_tokens
             max_seq_len = new_max_seq_len
 
@@ -861,7 +864,7 @@ class Hyperparameters:
     val_tokens: int = 10485760 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
     train_batch_size: int = 2048 * 24 * 8
     train_max_seq_len: int = 128 * 11
-    val_batch_size: int = 4 * 64 * 1024
+    val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
     num_iterations: int = 1695 # number of iterations to run
     cooldown_frac: int = 0.45 # fraction of training spent cooling down the learning rate
@@ -1010,7 +1013,7 @@ for step in range(train_steps + 1):
         training_time_ms += 1000 * (time.perf_counter() - t0)
         model.eval()
         assert args.val_tokens % args.val_batch_size == 0
-        val_steps = args.val_tokens // (args.val_batch_size * grad_accum_steps)
+        val_steps = grad_accum_steps * args.val_tokens // args.val_batch_size
         val_loader = distributed_data_generator(args.val_files, args.val_batch_size, -1, grad_accum_steps=grad_accum_steps, align_to_bos=False)
         val_loss = 0
         with torch.no_grad():
