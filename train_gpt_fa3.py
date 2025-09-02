@@ -802,7 +802,7 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
 
     while True:
         num_tokens_local = num_tokens // world_size // grad_accum_steps
-        max_num_docs = next_multiple_of_n(num_tokens_local // 400, n=128)  # median doc length is ~400
+        max_num_docs = next_multiple_of_n(num_tokens_local // 300, n=128)  # median doc length is ~400
 
         if align_to_bos:
             try:
@@ -830,7 +830,6 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
             _targets = buf[1:].view(num_tokens_local, )
 
             cum_lengths = torch.nonzero(_inputs == BOS_ID)[:, 0]
-
             pos += num_tokens
 
         _cum_lengths = torch.full((max_num_docs,), num_tokens_local)
