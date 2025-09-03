@@ -613,7 +613,7 @@ class CausalSelfAttention(nn.Module):
         else: # skip mid-layers token value embeddings by @YouJiacheng
             v = lambdas[0] * v
 
-        max_len = args.train_max_seq_len if self.training else args.val_batch_size
+        max_len = args.train_max_seq_len if self.training else (args.val_batch_size // (grad_accum_steps * world_size))
 
         # use flash_attn over flex_attn @varunneal. flash_attn_varlen suggested by @YouJiacheng
         y = flash_attn_varlen_func(q, k, v, cu_seqlens_q=seqlens, cu_seqlens_k=seqlens, max_seqlen_q=max_len, max_seqlen_k=max_len,
@@ -863,7 +863,7 @@ class Hyperparameters:
     val_files: str = "data/fineweb10B/fineweb_val_*.bin" # input .bin to eval validation loss on
     val_tokens: int = 10485760 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
     train_batch_size: int = 2048 * 24 * 8
-    train_max_seq_len: int = 128 * 11
+    train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
     num_iterations: int = 1695 # number of iterations to run
@@ -875,7 +875,7 @@ class Hyperparameters:
     # attention masking
     block_size: int = 128
     ws_schedule: tuple = (3, 7, 11)
-    val_ws: int = 11
+    val_ws: int = 17
 
 args = Hyperparameters()
 
@@ -928,7 +928,7 @@ model: nn.Module = GPT(
     num_layers=12,
     num_heads=6,
     model_dim=768,
-    max_seq_len=max(args.train_batch_size, args.val_batch_size)
+    max_seq_len=max(args.train_batch_size, args.val_batch_size) // (grad_accum_steps * world_size)
 ).cuda()
 for m in model.modules():
     if isinstance(m, nn.Embedding):
@@ -945,8 +945,8 @@ head_params = [model.lm_head.weight]
 # init the optimizer(s)
 # small adam epsilon by @YouJiacheng. this is an alternate method of fixing the world_size dependence
 # discovered by @fernbear.bsky.social https://x.com/hi_tysam/status/1879692937589875094
-optimizer1 = DistAdam(scalar_params + head_params + embed_params, lr=0.008 * 0.8, betas=(0.8, 0.95), eps=1e-10, weight_decay=0.0)
-optimizer2 = Muon(hidden_matrix_params, lr=0.05 * 0.8, momentum=0.95, weight_decay=0.0)
+optimizer1 = DistAdam(scalar_params + head_params + embed_params, lr=0.008, betas=(0.8, 0.95), eps=1e-10, weight_decay=0.0)
+optimizer2 = Muon(hidden_matrix_params, lr=0.05, momentum=0.95, weight_decay=0.0)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
