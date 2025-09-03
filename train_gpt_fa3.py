@@ -769,7 +769,6 @@ class BOSFinder:
             cur_len = 0
             while cur_len <= num_tokens_local:
                 if idx >= n:
-                    print(f"Insufficient BOS ahead of position {cur}; hit tail of shard.")
                     raise StopIteration(f"Insufficient BOS ahead of position {cur}; hit tail of shard.")
                 cur = self.bos_idx[idx]
                 starts[r].append(cur)
@@ -866,7 +865,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 1660 # number of iterations to run
+    num_iterations: int = 1680 # number of iterations to run
     cooldown_frac: int = 0.45 # fraction of training spent cooling down the learning rate
     # evaluation and logging
     run_id: str = str(uuid.uuid4())
