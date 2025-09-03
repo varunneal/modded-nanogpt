@@ -14,35 +14,29 @@ However, a [recent PR](https://github.com/Dao-AILab/flash-attention/pull/1769) b
 
 ## Timing and Validation
 
-Validated over 7 runs:
-- In 1695 training steps, this run achieves a loss <3.28 (`p=0.0031`) 
-- In 166.10 seconds on average, or <166.25 seconds (`p=0.0024`), 
+In 1670 training steps, this run achieves a loss <3.28 (`p=0.0001`) in 163.84 seconds on average, validated over 7 runs.
 
 ```
-import scipy.stats
 import torch
 import numpy as np
 
 accs = [
-    3.2769, 3.2782, 3.2790, 3.2791, 3.2791, 3.2780, 3.2782
+    3.2771, 3.2755, 3.2760, 3.2766, 3.2778, 3.2774, 3.2780
 ]
 
 times = [
-    166.247, 166.117, 165.977, 166.135, 166.045, 166.044, 166.157
+    163.871, 163.621, 163.848, 163.998, 163.897, 164.016, 163.618
 ]
 
 print('p=%.4f' % scipy.stats.ttest_1samp(accs, 3.28, alternative='less').pvalue)
-# p=0.0008
-
-print('p=%.4f' % scipy.stats.ttest_1samp(times, 166.25, alternative='less').pvalue)
-# p=0.0024
+# p=0.0001
 
 print(f"{np.mean(times):.4f}")
-# 166.1031
+# 163.8384
 ```
 
-In my timing, this is a 2.1 second mean improvement over [PR#117])(https://github.com/KellerJordan/modded-nanogpt/pull/117). 
-The number of steps can also probably be brought down by 5-15 while achieving loss <3.28.
+In my timing, this is a 4.3 second mean improvement over [PR#117])(https://github.com/KellerJordan/modded-nanogpt/pull/117). 
+The number of steps can also probably be brought down by 5-10 while achieving loss <3.28.
 
 I used SXM5 8 x H100 via Prime Intellect for validation compute. 
 
@@ -121,11 +115,12 @@ Each graph needs to be warmed up separately. I have increased the number
 of warmup steps from `10` to `30`. The compile time is dominated by the first iteration
 so this will take approximately `len(ws_schedule)` times longer than before.
 
-
 Document masks are implemented by specifying the start and end of each sequence in `cu_seqlens_*`. 
 In order for the tensor sizes to be fixed, we pad `cu_seqlens_*` to be a fixed length of a length larger
 than the number of documents we may ever expect in a single input batch.
 At training time, sequences are clipped to `args.max_seq_len` tokens. 
+This clipping helps pack a greater diversity of sequences per batch. 
+I believe this change to be responsible for the decrease of ~25 training steps. 
 
 ### Potential Improvements
 
