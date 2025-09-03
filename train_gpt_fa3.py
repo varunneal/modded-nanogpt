@@ -866,7 +866,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 1695 # number of iterations to run
+    num_iterations: int = 1660 # number of iterations to run
     cooldown_frac: int = 0.45 # fraction of training spent cooling down the learning rate
     # evaluation and logging
     run_id: str = str(uuid.uuid4())
@@ -980,7 +980,6 @@ initial_state = dict(model=copy.deepcopy(model.state_dict()),
 train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len, grad_accum_steps=grad_accum_steps)
 for step in range(warmup_steps):
     inputs, targets, cum_seqlens = next(train_loader)
-    print(f"Inputs shape {inputs.shape}; seqlens shape {cum_seqlens.shape}")
     ws = args.ws_schedule[step % len(args.ws_schedule)]  # each window size is a new graph, need to warm up each
     model(inputs, targets, cum_seqlens, ws).backward()
     for opt in optimizers:
