@@ -9,7 +9,7 @@ Additionally, it has been updated after helpful discussion with @ClassicLarry an
 The main idea of this record is to use [Flash Attention v3](https://github.com/Dao-AILab/flash-attention) instead of Flex Attention. 
 The official version of this module is incompatible with `torch.compile` and causes graph breaks. 
 However, a [recent PR](https://github.com/Dao-AILab/flash-attention/pull/1769) by 
-[@guilhermeleobas](https://github.com/guilhermeleobas) addresses this issue.
+@guilhermeleobas addresses this issue.
 
 
 ## Timing and Validation
@@ -35,7 +35,7 @@ print(f"{np.mean(times):.4f}")
 # 163.8384
 ```
 
-In my timing, this is a 4.3 second mean improvement over [PR#117])(https://github.com/KellerJordan/modded-nanogpt/pull/117). 
+In my timing, this is a 4.3 second mean improvement over https://github.com/KellerJordan/modded-nanogpt/pull/117.  
 The number of steps can also probably be brought down by 5-10 while achieving loss <3.28.
 
 I used SXM5 8 x H100 via Prime Intellect for validation compute. 
