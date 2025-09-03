@@ -605,7 +605,7 @@ class CausalSelfAttention(nn.Module):
         assert B == 1, "varlen sequences requires B == 1"
         assert T % 16 == 0
 
-        q, k, v = F.linear(x, self.qkvo_w[:3].flatten(end_dim=1).type_as(x)).view(B * T, 3 * self.num_heads, self.head_dim).chunk(3, dim=-2)
+        q, k, v = F.linear(x, self.qkvo_w[:3].flatten(end_dim=1).type_as(x)).view(B, T, 3 * self.num_heads, self.head_dim).chunk(3, dim=-2)
         q, k = norm(q), norm(k) # QK norm @Grad62304977
         q, k = self.rotary(q).squeeze(0), self.rotary(k).squeeze(0)
         if ve is not None:
@@ -616,8 +616,8 @@ class CausalSelfAttention(nn.Module):
         max_len = args.train_max_seq_len if self.training else (args.val_batch_size // (grad_accum_steps * world_size))
 
         # use flash_attn over flex_attn @varunneal. flash_attn_varlen suggested by @YouJiacheng
-        y = flash_attn_varlen_func(q, k, v, cu_seqlens_q=seqlens, cu_seqlens_k=seqlens, max_seqlen_q=max_len, max_seqlen_k=max_len,
-                            causal=True, softmax_scale=self.attn_scale, window_size=(bm_size, 0))
+        y = flash_attn_varlen_func(q[0], k[0], v[0], cu_seqlens_q=seqlens, cu_seqlens_k=seqlens, max_seqlen_q=max_len, max_seqlen_k=max_len,
+                                   causal=True, softmax_scale=self.attn_scale, window_size=(bm_size, 0))
         y = y.view(B, T, self.num_heads, self.head_dim)
         y = y * torch.sigmoid(self.attn_gate(x[..., :self.attn_gate_dim])).view(B, T, self.num_heads, 1)
         y = y.contiguous().view(B, T, self.num_heads * self.head_dim) # re-assemble all head outputs side by side
@@ -705,7 +705,7 @@ class GPT(nn.Module):
         ve = [ve[0], ve[1], ve[2]] + [None] * (len(self.blocks) - 6) + [ve[0], ve[1], ve[2]]
         assert len(ve) == len(self.blocks)
 
-        long_bm, short_bm = ws * args.block_size, ws * args.block_size // 2
+        long_bm, short_bm = ws * args.block_size, (ws // 2) * args.block_size
         bm_sizes = [long_bm, short_bm, short_bm, short_bm, long_bm, short_bm, short_bm, long_bm, short_bm, short_bm, short_bm, long_bm]
         assert len(bm_sizes) == len(self.blocks)
 
@@ -780,18 +780,17 @@ class BOSFinder:
                 cur_len += end - cur
                 idx += 1
 
-            assert cur_len == num_tokens_local + 1, f"cur_len is {cur_len}"
+            assert cur_len == num_tokens_local + 1
         self.i = idx
 
         return starts, ends
 
-def distributed_data_generator(filename_pattern: str, num_tokens: int,
-                               max_seq_len: int, align_to_bos: bool = True):
+def distributed_data_generator(filename_pattern: str, num_tokens: int, max_seq_len: int, grad_accum_steps: int = 1, align_to_bos: bool = True):
     # align_to_bos: each sequence begins with Beginning of Sequence token, sequences truncated to max_seq_len
     rank = dist.get_rank() if dist.is_initialized() else 0
     world_size = dist.get_world_size() if dist.is_initialized() else 1
-    assert num_tokens % (world_size) == 0, "Batch size must be divisible by world size"
-
+    assert num_tokens % (world_size * grad_accum_steps) == 0, "Batch size must be divisible by world size"
+    num_tokens = num_tokens // grad_accum_steps
 
     files = [Path(file) for file in sorted(glob.glob(filename_pattern))]
     if not files:
@@ -846,11 +845,12 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int,
         )
 
         if new_params is not None:
-            # makes it possible for generator to receive new (num_tokens, max_seq_len) via .send()
-            new_num_tokens, new_max_seq_len = new_params
-            assert new_num_tokens % world_size == 0, "Num tokens must be divisible by world size"
+            # makes it possible for generator to receive new (num_tokens, max_seq_len, grad_accum_steps) via .send()
+            new_num_tokens, new_max_seq_len, new_grad_accum_steps = new_params
+            assert new_num_tokens % (world_size * grad_accum_steps) == 0, "Num tokens must be divisible by world size"
             num_tokens = new_num_tokens
             max_seq_len = new_max_seq_len
+            grad_accum_steps = new_grad_accum_steps 
 
 
 # -----------------------------------------------------------------------------
@@ -875,7 +875,6 @@ class Hyperparameters:
     # attention masking
     block_size: int = 128
     ws_schedule: tuple = (3, 7, 11)
-    val_ws: int = 17
 
 args = Hyperparameters()
 
@@ -978,7 +977,7 @@ model: nn.Module = torch.compile(model, dynamic=False, fullgraph=True)
 warmup_steps = 15
 initial_state = dict(model=copy.deepcopy(model.state_dict()),
                      optimizers=[copy.deepcopy(opt.state_dict()) for opt in optimizers]) # save the initial state
-train_loader = distributed_data_generator(args.train_files, args.train_batch_size // grad_accum_steps, args.train_max_seq_len)
+train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len, grad_accum_steps=grad_accum_steps)
 for step in range(warmup_steps):
     inputs, targets, cum_seqlens = next(train_loader)
     print(f"Inputs shape {inputs.shape}; seqlens shape {cum_seqlens.shape}")
@@ -996,7 +995,7 @@ del train_loader, initial_state
 #        Training and validation       #
 ########################################
 
-train_loader = distributed_data_generator(args.train_files, args.train_batch_size // grad_accum_steps, args.train_max_seq_len)
+train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len, grad_accum_steps=grad_accum_steps)
 training_time_ms = 0
 # start the clock
 torch.cuda.synchronize()
@@ -1005,6 +1004,7 @@ t0 = time.perf_counter()
 train_steps = args.num_iterations
 for step in range(train_steps + 1):
     last_step = (step == train_steps)
+    ws = get_ws(step)
 
     # --------------- VALIDATION SECTION -----------------
     if last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0):
@@ -1014,15 +1014,12 @@ for step in range(train_steps + 1):
         model.eval()
         assert args.val_tokens % args.val_batch_size == 0
         val_steps = grad_accum_steps * args.val_tokens // args.val_batch_size
-        val_loader = distributed_data_generator(args.val_files, args.val_batch_size // grad_accum_steps, -1, align_to_bos=False)
+        val_loader = distributed_data_generator(args.val_files, args.val_batch_size, -1, grad_accum_steps=grad_accum_steps, align_to_bos=False)
         val_loss = 0
         with torch.no_grad():
-            print(f"Validation in {val_steps} steps")
             for _ in range(val_steps):
                 inputs, targets, cum_seqlens = next(val_loader)
-                if step == 0:
-                    print(f"Inputs shape {inputs.shape}; seqlens shape {cum_seqlens.shape}")
-                val_loss += model(inputs, targets, cum_seqlens, args.val_ws)
+                val_loss += model(inputs, targets, cum_seqlens, ws)
         val_loss /= val_steps
         del val_loader
         dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
@@ -1041,7 +1038,6 @@ for step in range(train_steps + 1):
         break
 
     # --------------- TRAINING SECTION -----------------
-    ws = get_ws(step)
     for _ in range(grad_accum_steps):
         inputs, targets, cum_seqlens = next(train_loader)
         model(inputs, targets, cum_seqlens, ws).backward()
