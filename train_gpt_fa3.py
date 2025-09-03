@@ -865,7 +865,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 1680 # number of iterations to run
+    num_iterations: int = 1670 # number of iterations to run
     cooldown_frac: int = 0.45 # fraction of training spent cooling down the learning rate
     # evaluation and logging
     run_id: str = str(uuid.uuid4())
@@ -973,7 +973,7 @@ model: nn.Module = torch.compile(model, dynamic=False, fullgraph=True)
 ########################################
 
 # Warmup the training kernels, then re-initialize the state so we aren't cheating
-warmup_steps = 15
+warmup_steps = 30
 initial_state = dict(model=copy.deepcopy(model.state_dict()),
                      optimizers=[copy.deepcopy(opt.state_dict()) for opt in optimizers]) # save the initial state
 train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len, grad_accum_steps=grad_accum_steps)
