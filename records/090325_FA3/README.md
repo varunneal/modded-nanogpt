@@ -44,24 +44,20 @@ I used SXM5 8 x H100 via Prime Intellect for validation compute.
 
 ### Motivation
 
-PyTorch's Flex Attention is up to 40% slower than Flash Attention v3. 
-
-As the batch size, e.g. the number of parallel sequences increases, FA3 tends to be increasingly efficient in using SMs. 
-
-In order to train with document masking, we use Flex Attention's `flash_attn_varlen_func`. 
-We keep the number of tokens per step fixed (`393216`) but pack a variable number of sequences in each batch.
-We clip the maximum length of each sequence to `args.train_max_seq_len = 2048`. 
-
-WR#26 by @ClassicLarry found that validation loss decreases when we train only on sequences beginning with the Beginning of Sequence token (`<BoS>`). 
-
-In order generate batches where each sequence begins with `<BOS>`, I have created the helper class `BOSFinder`. 
-This class is useful for generating the start and end of each sequence. 
-
-### Flash Attention 3
-
+Flash Attention v3 achieves greater SM utilization on Hopper GPUs than Flash Attention v2. 
 Flash Attention 3 is significantly faster than Flex Attention, and this gap increases as we increase the number of sequences per batch:
 
 <img src="./media/attn_speed_vs_batch_s1024_ws384.png" alt="Flash vs Flex Attention varying #sequences/batch" width="500"/>
+
+In order to train with document masking, we use Flex Attention's `flash_attn_varlen_func` (suggested by @YouJiacheng).
+We keep the number of tokens per step fixed (`393216`) but pack a variable number of sequences in each batch,
+clipping the maximum length of each sequence to `args.train_max_seq_len = 2048`. 
+
+WR#26 by @ClassicLarry found that validation loss decreases when we train only on sequences beginning with the Beginning of Sequence token (`<BoS>`). 
+
+
+### Flash Attention 3
+
 
 As mentioned above, we need to use an unmerged PR in order to use FA3 with `torch.compile`. 
 You can build the wheel like so:
@@ -115,12 +111,16 @@ Each graph needs to be warmed up separately. I have increased the number
 of warmup steps from `10` to `30`. The compile time is dominated by the first iteration
 so this will take approximately `len(ws_schedule)` times longer than before.
 
+
 Document masks are implemented by specifying the start and end of each sequence in `cu_seqlens_*`. 
 In order for the tensor sizes to be fixed, we pad `cu_seqlens_*` to be a fixed length of a length larger
 than the number of documents we may ever expect in a single input batch.
+
 At training time, sequences are clipped to `args.max_seq_len` tokens. 
 This clipping helps pack a greater diversity of sequences per batch. 
 I believe this change to be responsible for the decrease of ~25 training steps. 
+
+In order to implement the above, I have created the helper class `BOSFinder`. 
 
 ### Potential Improvements
 
