@@ -45,7 +45,7 @@ I used SXM5 8 x H100 via Prime Intellect for validation compute.
 ### Motivation
 
 Flash Attention v3 achieves greater SM utilization on Hopper GPUs than Flash Attention v2. 
-Flash Attention 3 is significantly faster than Flex Attention, and this gap increases as we increase the number of sequences per batch:
+Flash Attention 3 is significantly faster than Flex Attention on batched inputs, and this gap increases as we increase the number of sequences per batch:
 
 <img src="./media/attn_speed_vs_batch_s1024_ws384.png" alt="Flash vs Flex Attention varying #sequences/batch" width="500"/>
 
@@ -125,9 +125,9 @@ In order to implement the above, I have created the helper class `BOSFinder`.
 ### Potential Improvements
 
 - Batch size scheduling: Previously, the block mask acted as a proxy for batch size.
-Now block size can be controlled explicitly and sequenced according to critical batch
-size theory. I have added code in `distributed_data_generator` that allows for changing the 
-batch size and max sequence length yielded after the generator is created. 
+Now block size can be controlled explicitly and sequenced according to critical batch size theory. 
+I have added code in `distributed_data_generator` that allows for changing the 
+batch size max sequence length, and grad_accum_steps yielded after the generator is created. 
 - The current block mask window schedule `(3, 7, 11)` can almost certainly  be improved upon.
 - Hyperparameter tuning might change with smaller sequence length. Rotary base, validation sequence length, learning rates 
 etc. should be re-tuned. I haven't done that for this run. 
