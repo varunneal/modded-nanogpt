@@ -1086,12 +1086,12 @@ class Hyperparameters:
     train_files: str = "data/fineweb10B/fineweb_train_*.bin" # input .bin to train on
     val_files: str = "data/fineweb10B/fineweb_val_*.bin" # input .bin to eval validation loss on
     val_tokens: int = 10485760 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-    train_batch_size: int = 2048 * 24 * 8
+    train_batch_size: int = 2048 * 24 #* 8
     train_max_seq_len: int = 128 * 16
-    val_batch_size: int = 4 * 64 * 1024 * 8
+    val_batch_size: int = 4 * 64 * 1024 #* 8
     # optimization
     num_iterations: int = 1750 # number of iterations to run
-    cooldown_frac: int = 0.5 # fraction of training spent cooling down the learning rate
+    cooldown_frac: int = 0.45 # fraction of training spent cooling down the learning rate
     # evaluation and logging
     run_id: str = f"{uuid.uuid4()}"
     val_loss_every: int = 125 # every how many steps to evaluate val loss? 0 for only at the end
@@ -1111,7 +1111,7 @@ args.val_files = os.path.join(data_path, args.val_files)
 rank = int(os.environ["RANK"])
 world_size = int(os.environ["WORLD_SIZE"])
 assert 8 % world_size == 0, "world_size must be a divisor of 8"
-grad_accum_steps = 8 // world_size
+grad_accum_steps = 1#8 // world_size
 assert torch.cuda.is_available()
 device = torch.device("cuda", int(os.environ["LOCAL_RANK"]))
 torch.cuda.set_device(device)
@@ -1177,7 +1177,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params, lr=0.04, momentum=0.95, weight_decay=0.0)
+optimizer2 = Muon(hidden_matrix_params, lr=0.05, momentum=0.95, weight_decay=0.0)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
