@@ -797,11 +797,33 @@ def swiglu(x):
     return F.silu(x_gate.clamp(None, 7.)) * x0
 
 
-class MLP(nn.Module):
+def sq_relu(x):
+    return F.relu(x).square() 
+
+
+class MLPSqRelu(nn.Module)
     def __init__(self, dim: int):
         super().__init__()
-        self.c_fc = nn.Parameter(torch.empty(dim, 6 * dim))
-        self.c_proj = nn.Parameter(torch.empty(dim, 3 * dim))
+        self.c_fc = nn.Parameter(torch.empty(dim, 4 * dim))
+        self.c_proj = nn.Parameter(torch.empty(dim, 4 * dim))
+        std = 0.5 * (dim ** -0.5)
+        bound = (3 ** 0.5) * std # improved init scale by @YouJiacheng
+        with torch.no_grad():
+            self.c_fc.uniform_(-bound, bound)
+            self.c_proj.zero_() # zero init suggested by @Grad62304977
+
+    def forward(self, x: Tensor):
+        x = F.linear(x, self.c_fc.T.type_as(x))  # dim -> hdim
+        x = sq_relu(x) 
+        x = F.linear(x, self.c_proj.type_as(x))
+        return x
+
+
+class MLPSwiglu(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.c_fc = nn.Parameter(torch.empty(dim, 4 * dim))
+        self.c_proj = nn.Parameter(torch.empty(dim, 2 * dim))
         std = 0.5 * (dim ** -0.5)
         bound = (3 ** 0.5) * std # improved init scale by @YouJiacheng
         with torch.no_grad():
@@ -821,7 +843,12 @@ class Block(nn.Module):
         # skip attention of blocks.7 (the 8th layer) by @YouJiacheng
         self.attn = CausalSelfAttention(dim, head_dim, num_heads) if layer_idx != 7 else None
         # skip MLP blocks for first MLP layer by @EmelyanenkoK
-        self.mlp = MLP(dim) if layer_idx != 0 else None
+
+        self.mlp = None
+        if layer_idx > 6:
+            self.mlp = MLPSwiglu(dim)
+        elif layer_idx > 0:
+            self.mlp = MLPSqRelu(dim)
 
     def forward(self, x: Tensor, x0: Tensor, lambdas: Tensor, attn_args: AttnArgs):
         x = lambdas[0] * x + lambdas[1] * x0
