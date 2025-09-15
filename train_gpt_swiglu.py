@@ -823,8 +823,8 @@ class MLPSqRelu(nn.Module):
 class MLPSwiglu(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
-        self.c_fc = nn.Parameter(torch.empty(dim, 4 * dim))
-        self.c_proj = nn.Parameter(torch.empty(dim, 2 * dim))
+        self.c_fc = nn.Parameter(torch.empty(dim, 5 * dim))
+        self.c_proj = nn.Parameter(torch.empty(dim, 5 * dim // 2))
         std = 0.5 * (dim ** -0.5)
         bound = (3 ** 0.5) * std # improved init scale by @YouJiacheng
         with torch.no_grad():
