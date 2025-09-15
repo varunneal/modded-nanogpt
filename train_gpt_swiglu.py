@@ -1114,7 +1114,7 @@ class Hyperparameters:
     train_files: str = "data/fineweb10B/fineweb_train_*.bin" # input .bin to train on
     val_files: str = "data/fineweb10B/fineweb_val_*.bin" # input .bin to eval validation loss on
     val_tokens: int = 10485760 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-    train_batch_size: int = 2048 * 20 * 8
+    train_batch_size: int = 2048 * 24 * 8
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
@@ -1126,8 +1126,8 @@ class Hyperparameters:
     save_checkpoint: bool = False
     # attention masking
     block_size: int = 128
-    ws_schedule: tuple = (3, 7, 11)
-    ws_validate: int = 13 # increase final validation ws @classiclarryd
+    ws_schedule: tuple = (3, 9, 15)
+    ws_validate: int = 17 # increase final validation ws @classiclarryd
 
 args = Hyperparameters()
 
