@@ -801,7 +801,7 @@ def sq_relu(x):
     return F.relu(x).square() 
 
 
-class MLPSqRelu(nn.Module)
+class MLPSqRelu(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
         self.c_fc = nn.Parameter(torch.empty(dim, 4 * dim))
