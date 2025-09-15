@@ -846,10 +846,10 @@ class Block(nn.Module):
         # skip MLP blocks for first MLP layer by @EmelyanenkoK
 
         self.mlp = None
-        if layer_idx >= 9:
+        if layer_idx > 0:
             self.mlp = MLPSwiglu(dim)
-        elif layer_idx > 0:
-            self.mlp = MLPSqRelu(dim)
+        # elif layer_idx > 0:
+            # self.mlp = MLPSqRelu(dim)
 
     def forward(self, x: Tensor, x0: Tensor, lambdas: Tensor, attn_args: AttnArgs):
         x = lambdas[0] * x + lambdas[1] * x0
