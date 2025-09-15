@@ -1305,7 +1305,7 @@ for step in range(train_steps + 1):
     loss = 0
     for _ in range(grad_accum_steps):
         inputs, targets, cum_seqlens = next(train_loader)
-        loss = model(inputs, targets, cum_seqlens, ws)
+        loss += model(inputs, targets, cum_seqlens, ws)
     loss.backward()
     # set optimization hyperparameters
     for opt in optimizers:
