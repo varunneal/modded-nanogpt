@@ -1272,11 +1272,13 @@ for step in range(train_steps + 1):
         break
 
     # --------------- TRAINING SECTION -----------------
-    loss = 0
+    t_loss = 0
     for _ in range(grad_accum_steps):
         inputs, targets, cum_seqlens = next(train_loader)
         loss += model(inputs, targets, cum_seqlens, ws)
-    loss.backward()
+        t_loss += loss.item()
+        loss.backward()
+
     # set optimization hyperparameters
     for opt in optimizers:
         for group in opt.param_groups:
@@ -1293,7 +1295,7 @@ for step in range(train_steps + 1):
     approx_training_time_ms = training_time_ms + 1000 * (time.perf_counter() - t0)
     print0(f"step:{step+1}/{train_steps} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
     if step % 10 == 0:
-        print0(f"step:{step+1}/{train_steps} training_loss:{loss.item()}", console=True)
+        print0(f"step:{step+1}/{train_steps} training_loss:{t_loss}", console=True)
 
 
 print0(f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "
