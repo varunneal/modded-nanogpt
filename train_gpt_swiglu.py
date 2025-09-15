@@ -846,7 +846,7 @@ class Block(nn.Module):
         # skip MLP blocks for first MLP layer by @EmelyanenkoK
 
         self.mlp = None
-        if layer_idx > 7:
+        if layer_idx >= 9:
             self.mlp = MLPSwiglu(dim)
         elif layer_idx > 0:
             self.mlp = MLPSqRelu(dim)
