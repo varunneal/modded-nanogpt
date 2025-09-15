@@ -1127,7 +1127,7 @@ logfile = None
 if master_process:
     run_id = args.run_id
     os.makedirs("logs", exist_ok=True)
-    logfile = f"logs/pr125_{datetime}_{run_id}.txt"
+    logfile = f"logs/pr125_{date_time}_{run_id}.txt"
     print(logfile)
 def print0(s, console=False):
     if master_process:

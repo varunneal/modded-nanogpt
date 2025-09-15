@@ -771,6 +771,7 @@ class CausalSelfAttention(nn.Module):
         rotary_cos, rotary_sin = attn_args.rotary_cos, attn_args.rotary_sin
         ve, sa_lambdas = attn_args.ve, attn_args.sa_lambdas
         seqlens, attn_scale, bm_size = attn_args.seqlens, attn_args.attn_scale, attn_args.bm_size
+        attn_scale = 0.12
 
         q, k, v = F.linear(x, self.qkvo_w[:3].flatten(end_dim=1).type_as(x)).view(B, T, 3 * self.num_heads, self.head_dim).chunk(3, dim=-2)
         q, k = norm(q), norm(k) # QK norm @Grad62304977
@@ -1155,7 +1156,7 @@ logfile = None
 if master_process:
     run_id = args.run_id
     os.makedirs("logs", exist_ok=True)
-    logfile = f"logs/swiglu_{datetime}_{run_id}.txt"
+    logfile = f"logs/swiglu_{date_time}_{run_id}.txt"
     print(logfile)
 def print0(s, console=False):
     if master_process:
