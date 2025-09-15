@@ -1146,12 +1146,16 @@ dist.init_process_group(backend="nccl", device_id=device)
 dist.barrier()
 master_process = (rank == 0) # this process will do logging, checkpointing etc.
 
+from datetime import datetime
+now = datetime.now()
+date_time = now.strftime("%H%M")
+
 # begin logging
 logfile = None
 if master_process:
     run_id = args.run_id
     os.makedirs("logs", exist_ok=True)
-    logfile = f"logs/{run_id}.txt"
+    logfile = f"logs/swiglu_{datetime}_{run_id}.txt"
     print(logfile)
 def print0(s, console=False):
     if master_process:
