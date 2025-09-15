@@ -1114,7 +1114,7 @@ class Hyperparameters:
     train_files: str = "data/fineweb10B/fineweb_train_*.bin" # input .bin to train on
     val_files: str = "data/fineweb10B/fineweb_val_*.bin" # input .bin to eval validation loss on
     val_tokens: int = 10485760 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-    train_batch_size: int = 2048 * 24 * 8
+    train_batch_size: int = 2048 * 20 * 8
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
@@ -1148,8 +1148,16 @@ dist.barrier()
 master_process = (rank == 0) # this process will do logging, checkpointing etc.
 
 from datetime import datetime
-now = datetime.now()
-date_time = now.strftime("%H%M")
+from zoneinfo import ZoneInfo
+
+# Define the Eastern Time zone
+eastern_tz = ZoneInfo("America/New_York")
+
+# Get the current time in the Eastern Time zone
+now_eastern = datetime.now(eastern_tz)
+
+# Format the time as HHMM
+date_time = now_eastern.strftime("%H%M")
 
 # begin logging
 logfile = None

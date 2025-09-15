@@ -1118,8 +1118,16 @@ master_process = (rank == 0) # this process will do logging, checkpointing etc.
 
 
 from datetime import datetime
-now = datetime.now()
-date_time = now.strftime("%H%M")
+from zoneinfo import ZoneInfo
+
+# Define the Eastern Time zone
+eastern_tz = ZoneInfo("America/New_York")
+
+# Get the current time in the Eastern Time zone
+now_eastern = datetime.now(eastern_tz)
+
+# Format the time as HHMM
+date_time = now_eastern.strftime("%H%M")
 
 
 # begin logging
