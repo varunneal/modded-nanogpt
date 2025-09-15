@@ -791,6 +791,12 @@ class CausalSelfAttention(nn.Module):
         y = F.linear(y, self.qkvo_w[3].type_as(y))
         return y
 
+
+def swiglu(x):
+    x0, x_gate = x.chunk(2, dim=-1)
+    return F.silu(x_gate) * x0
+
+
 class MLP(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
@@ -803,11 +809,11 @@ class MLP(nn.Module):
             self.c_proj.zero_() # zero init suggested by @Grad62304977
 
     def forward(self, x: Tensor):
-        # swiglu activation by @varunneal       
-        x_linear, x_gate = F.linear(x, self.c_fc.T.type_as(x)).chunk(2, dim=-1)
-        x = F.silu(x_gate) * x_linear
+        x = F.linear(x, self.c_fc.T.type_as(x))  # dim -> hdim
+        x = swiglu(x)  # hdim -> hdim / 2
         x = F.linear(x, self.c_proj.type_as(x))
         return x
+
 
 class Block(nn.Module):
     def __init__(self, dim: int, head_dim: int, num_heads: int, layer_idx: int):
@@ -1084,7 +1090,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 1690 # number of iterations to run
+    num_iterations: int = 1750 # number of iterations to run
     cooldown_frac: int = 0.5 # fraction of training spent cooling down the learning rate
     # evaluation and logging
     run_id: str = f"{uuid.uuid4()}"
