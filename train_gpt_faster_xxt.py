@@ -138,7 +138,7 @@ def _get_autotune_configs():
 @triton.jit
 def XXT_kernel(
     A_ptr, C_ptr,
-    B: tl.int32, N: tl.int32,                         # batch size and N (M=K=N)
+    B: tl.int32, N: tl.int32,
     stride_ab: tl.int64, stride_a0: tl.int64, stride_a1: tl.int64,
     stride_cb: tl.int64, stride_c0: tl.int64, stride_c1: tl.int64,
     BLOCK_SIZE: tl.constexpr,
@@ -169,6 +169,7 @@ def XXT_kernel(
     tl.multiple_of(offs_n, BLOCK_SIZE)
     tl.multiple_of(offs_k, BLOCK_SIZE)
 
+    # TODO: try in bfloat16
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
 
     num_k_tiles = N // BLOCK_SIZE
@@ -199,6 +200,7 @@ def XXT(A: torch.Tensor, out: torch.Tensor = None):
         B = 1
         stride_ab = 0
     else:
+        B = A.shape[0]      
         stride_ab = A.stride(0)
 
     assert N % 128 == 0, "Optimized kernel requires N % BLOCK_SIZE == 0"
@@ -254,6 +256,7 @@ def bA_plus_cAAT_kernel(
     tl.multiple_of(offs_n, BLOCK_SIZE)
     tl.multiple_of(offs_k, BLOCK_SIZE)
 
+    # TODO: try in bfloat16
     acc = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
 
     num_k_tiles = N // BLOCK_SIZE
