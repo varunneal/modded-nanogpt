@@ -1240,8 +1240,9 @@ class Hyperparameters:
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
     num_iterations: int = 1650 # number of iterations to run
-    cooldown_frac: int = 0.5 # fraction of training spent cooling down the learning rate
-
+    cooldown_frac: float = 0.5 # fraction of training spent cooling down the learning rate
+    final_lr: float = 0.11
+    adam_lr_freeze_steps: int = 50 # freeze last 50 steps of adam at final lr
     # evaluation and logging
     run_id: str = f"{uuid.uuid4()}"
     val_loss_every: int = 125 # every how many steps to evaluate val loss? 0 for only at the end
@@ -1334,16 +1335,18 @@ for opt in optimizers:
     for group in opt.param_groups:
         group["initial_lr"] = group["lr"]
 
-# learning rate schedule: flat then linear decay
-def get_lr(step: int):
-    lr_min, lr_max = 0.11, 1.0
-    inital_steps = (1 - args.cooldown_frac) * args.num_iterations
+# learning rate schedule: flat then linear decay, until flat again for last `end` steps
+def get_lr(step: int, end: int = 0):
+    lr_min, lr_max = args.final_lr, 1.0
+    initial_steps = (1 - args.cooldown_frac) * args.num_iterations
 
-    if step < inital_steps:
+    if step < initial_steps:
         return lr_max
 
-    decay_ratio = (step - inital_steps) / (args.num_iterations - inital_steps)
-    t = min(decay_ratio, 1.0)
+    if step >= args.num_iterations - end:
+        return lr_min
+
+    t = min((step - initial_steps) /  (args.num_iterations - end) - initial_steps, 1.0)
 
     lr = lr_min + (lr_max - lr_min) * (1 - t)
     return lr
@@ -1443,10 +1446,10 @@ for step in range(train_steps + 1):
         inputs, targets, cum_seqlens = next(train_loader)
         model(inputs, targets, cum_seqlens, ws_short, ws_long).backward()
     # set optimization hyperparameters
-    for opt in optimizers:
-        for group in opt.param_groups:
-            group["lr"] = group["initial_lr"] * get_lr(step)
-    for group in optimizer2.param_groups:
+    for group in adam_optimizer.param_groups:
+        group["lr"] = group["initial_lr"] * get_lr(step)
+    for group in muon_optimizer.param_groups:
+        group["lr"] = group["initial_lr"] * get_lr(step)
         frac = min(step / 300, 1) # momentum warmup for muon
         group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
     # step the optimizers
