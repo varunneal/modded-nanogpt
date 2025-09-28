@@ -1447,7 +1447,7 @@ for step in range(train_steps + 1):
         model(inputs, targets, cum_seqlens, ws_short, ws_long).backward()
     # set optimization hyperparameters
     for group in adam_optimizer.param_groups:
-        group["lr"] = group["initial_lr"] * get_lr(step)
+        group["lr"] = group["initial_lr"] * get_lr(step, end=args.adam_lr_freeze_steps)
     for group in muon_optimizer.param_groups:
         group["lr"] = group["initial_lr"] * get_lr(step)
         frac = min(step / 300, 1) # momentum warmup for muon
