@@ -1016,7 +1016,7 @@ class GPT(nn.Module):
         skip_connections = []
         skip_weights = torch.sigmoid(self.scalars[:(len(self.blocks) // 2)])
         lambdas = self.scalars[1 * len(self.blocks): 3 * len(self.blocks)].view(-1, 2)
-        sa_lambdas = torch.sigmoid(self.scalars[3 * len(self.blocks): 5 * len(self.blocks)]).view(-1, 2)
+        sa_lambdas = self.scalars[3 * len(self.blocks): 5 * len(self.blocks)].view(-1, 2)
 
         n = len(self.blocks) // 2
 
