@@ -1240,7 +1240,7 @@ class Hyperparameters:
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
     num_iterations: int = 1660 # number of iterations to run
-    cooldown_frac: float = 0.5 # fraction of training spent cooling down the learning rate
+    cooldown_frac: float = 0.45 # fraction of training spent cooling down the learning rate
     adam_lr_freeze_steps: int = 50 # freeze last 50 steps of adam at final lr
     # evaluation and logging
     run_id: str = f"{uuid.uuid4()}"
@@ -1328,7 +1328,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, weight_decay=0.0)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.065, momentum=0.95, weight_decay=0.0)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
