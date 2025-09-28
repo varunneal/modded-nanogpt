@@ -1039,15 +1039,21 @@ class GPT(nn.Module):
                 skip_connections.append(x)
 
         x = norm(x)
-        logits = self.lm_head(x)
+        # logits = self.lm_head(x)
+        # @Grad62304977 added tanh softcapping following Gemma 2 paper, @KoszarskyB reduced it from 30 to 15, @YouJiacheng shifted it by +15 (2*sigmoid(2*x)=tanh(x)+1)
+        # logits = 30 * torch.sigmoid(logits / 7.5)
+        # logits_for_loss = logits.float() if not self.training else logits
+        # loss = F.cross_entropy(
+        #     logits_for_loss.view(-1, logits_for_loss.size(-1)),
+        #     target_seq,
+        #     reduction="sum" if self.training else "mean",
+        # )
+        # return loss
+        logits = self.lm_head(x).float()
         # @Grad62304977 added tanh softcapping following Gemma 2 paper, @KoszarskyB reduced it from 30 to 15, @YouJiacheng shifted it by +15 (2*sigmoid(2*x)=tanh(x)+1)
         logits = 30 * torch.sigmoid(logits / 7.5)
-        logits_for_loss = logits.float() if not self.training else logits
-        loss = F.cross_entropy(
-            logits_for_loss.view(-1, logits_for_loss.size(-1)),
-            target_seq,
-            reduction="sum" if self.training else "mean",
-        )
+        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), target_seq,
+                               reduction="sum" if self.training else "mean")
         return loss
 
 # -----------------------------------------------------------------------------
@@ -1447,7 +1453,7 @@ for step in range(train_steps + 1):
         model(inputs, targets, cum_seqlens, ws_short, ws_long).backward()
     # set optimization hyperparameters
     for group in adam_optimizer.param_groups:
-        group["lr"] = group["initial_lr"] * get_lr(step, end=args.adam_lr_freeze_steps)
+        group["lr"] = group["initial_lr"] * get_lr(step)#, end=args.adam_lr_freeze_steps)
     for group in muon_optimizer.param_groups:
         group["lr"] = group["initial_lr"] * get_lr(step)
         frac = min(step / 300, 1) # momentum warmup for muon
