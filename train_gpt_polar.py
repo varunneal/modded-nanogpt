@@ -385,7 +385,7 @@ def polar_express(G: torch.Tensor):
         X = X.mT
 
     # Ensure spectral norm is at most 1
-    X = X / (X.norm(dim=(-2, -1), keepdim=True) * 1.01 + 1e-7)
+    X = X / (X.norm(dim=(-2, -1), keepdim=True) * 1.01 + 1e-6)
 
     # Allocate buffers
     X = X.contiguous()
@@ -1000,7 +1000,7 @@ class GPT(nn.Module):
 
         short_bm = ws_short * args.block_size
         long_bm = ws_long * args.block_size
-        bm_sizes = [None, short_bm, short_bm, short_bm, short_bm, long_bm,
+        bm_sizes = [None, short_bm, short_bm, short_bm, long_bm, short_bm,
                     short_bm, None, short_bm, short_bm, short_bm, long_bm]
         assert len(bm_sizes) == len(self.blocks)
 
@@ -1334,18 +1334,14 @@ for opt in optimizers:
     for group in opt.param_groups:
         group["initial_lr"] = group["lr"]
 
-# learning rate schedule: flat then linear decay, until flat again for last `end` steps
-def get_lr(step: int, end: int = 0):
+# learning rate schedule: flat then linear decay
+def get_lr(step: int):
     lr_min, lr_max = 0.1, 1.0
     initial_steps = (1 - args.cooldown_frac) * args.num_iterations
-
     if step < initial_steps:
         return lr_max
-    if step >= args.num_iterations - end:
-        return lr_min
 
-    t = (step - initial_steps) / ((args.num_iterations - end) - initial_steps)
-
+    t = (step - initial_steps) / (args.num_iterations - initial_steps)
     lr = lr_min + (lr_max - lr_min) * (1 - t)
     return lr
 
