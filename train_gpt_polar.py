@@ -631,10 +631,10 @@ class Muon(torch.optim.Optimizer):
                 d1 = original_shape[1] 
                 d2 = original_shape[2] // 4
                 batched = batched_update_grads.view(batch, d1, d2)
-                v_chunk = newton_schulz_triton(batched)
+                v_chunk = polar_express(batched)
                 v_chunk = v_chunk.view(original_shape)
             else:
-                v_chunk = newton_schulz_triton(batched_update_grads)
+                v_chunk = polar_express(batched_update_grads)
 
             # Add the computed zeropower update to the parameters in the buffer.
             # This loop applies the zeropower output (v_chunk) to the `updated_param_chunk` buffer.
