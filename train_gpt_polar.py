@@ -1241,7 +1241,6 @@ class Hyperparameters:
     # optimization
     num_iterations: int = 1650 # number of iterations to run
     cooldown_frac: float = 0.5 # fraction of training spent cooling down the learning rate
-    final_lr: float = 0.11
     adam_lr_freeze_steps: int = 50 # freeze last 50 steps of adam at final lr
     # evaluation and logging
     run_id: str = f"{uuid.uuid4()}"
@@ -1329,7 +1328,7 @@ adam_optimizer = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-muon_optimizer = Muon(hidden_matrix_params + gate_params, lr=0.07, momentum=0.95, weight_decay=0.0)
+muon_optimizer = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, weight_decay=0.0)
 optimizers = [adam_optimizer, muon_optimizer]
 for opt in optimizers:
     for group in opt.param_groups:
@@ -1337,7 +1336,7 @@ for opt in optimizers:
 
 # learning rate schedule: flat then linear decay, until flat again for last `end` steps
 def get_lr(step: int, end: int = 0):
-    lr_min, lr_max = args.final_lr, 1.0
+    lr_min, lr_max = 0.1, 1.0
     initial_steps = (1 - args.cooldown_frac) * args.num_iterations
 
     if step < initial_steps:
