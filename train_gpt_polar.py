@@ -1000,7 +1000,7 @@ class GPT(nn.Module):
 
         short_bm = ws_short * args.block_size
         long_bm = ws_long * args.block_size
-        bm_sizes = [None, short_bm, short_bm, short_bm, long_bm, short_bm,
+        bm_sizes = [None, short_bm, short_bm, short_bm, short_bm, long_bm,
                     short_bm, None, short_bm, short_bm, short_bm, long_bm]
         assert len(bm_sizes) == len(self.blocks)
 
@@ -1239,7 +1239,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 1655 # number of iterations to run
+    num_iterations: int = 1660 # number of iterations to run
     cooldown_frac: float = 0.5 # fraction of training spent cooling down the learning rate
     adam_lr_freeze_steps: int = 50 # freeze last 50 steps of adam at final lr
     # evaluation and logging
