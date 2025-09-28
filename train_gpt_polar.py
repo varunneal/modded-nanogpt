@@ -1364,7 +1364,7 @@ def get_lr(step: int, end: int = 0):
     if step >= args.num_iterations - end:
         return lr_min
 
-    t = min((step - initial_steps) /  (args.num_iterations - end) - initial_steps, 1.0)
+    t = (step - initial_steps) / ((args.num_iterations - end) - initial_steps)
 
     lr = lr_min + (lr_max - lr_min) * (1 - t)
     return lr
