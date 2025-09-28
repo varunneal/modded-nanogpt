@@ -1000,7 +1000,7 @@ class GPT(nn.Module):
 
         short_bm = ws_short * args.block_size
         long_bm = ws_long * args.block_size
-        bm_sizes = [None, short_bm, short_bm, short_bm, long_bm, short_bm,
+        bm_sizes = [None, short_bm, short_bm, short_bm, short_bm, long_bm,
                     short_bm, None, short_bm, short_bm, short_bm, long_bm]
         assert len(bm_sizes) == len(self.blocks)
 
@@ -1015,8 +1015,8 @@ class GPT(nn.Module):
         # U-net design by @brendanh0gan
         skip_connections = []
         skip_weights = torch.sigmoid(self.scalars[:(len(self.blocks) // 2)])
-        lambdas = torch.clamp(self.scalars[1 * len(self.blocks): 3 * len(self.blocks)].view(-1, 2), 0., 15.)
-        sa_lambdas = torch.clamp(torch.sigmoid(self.scalars[3 * len(self.blocks): 5 * len(self.blocks)]).view(-1, 2), 0., 4.5)
+        lambdas = self.scalars[1 * len(self.blocks): 3 * len(self.blocks)].view(-1, 2)
+        sa_lambdas = torch.sigmoid(self.scalars[3 * len(self.blocks): 5 * len(self.blocks)]).view(-1, 2)
 
         n = len(self.blocks) // 2
 
