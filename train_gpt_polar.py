@@ -1239,7 +1239,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 1650 # number of iterations to run
+    num_iterations: int = 1655 # number of iterations to run
     cooldown_frac: float = 0.5 # fraction of training spent cooling down the learning rate
     adam_lr_freeze_steps: int = 50 # freeze last 50 steps of adam at final lr
     # evaluation and logging
