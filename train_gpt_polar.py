@@ -1328,15 +1328,27 @@ gate_params = [p for n, p in model.named_parameters() if "gate" in n]
 # init the optimizer(s)
 # small adam epsilon by @YouJiacheng. this is an alternate method of fixing the world_size dependence
 # discovered by @fernbear.bsky.social https://x.com/hi_tysam/status/1879692937589875094
-adam_optimizer = DistAdam(
+# adam_optimizer = DistAdam(
+#     scalar_params + head_params + embed_params,
+#     lr=0.008,
+#     betas=(0.8, 0.95),
+#     eps=1e-8,
+#     weight_decay=0.0,
+# )
+# muon_optimizer = Muon(hidden_matrix_params + gate_params, lr=0.07, momentum=0.95, weight_decay=0.0)
+# optimizers = [adam_optimizer, muon_optimizer]
+# for opt in optimizers:
+#     for group in opt.param_groups:
+#         group["initial_lr"] = group["lr"]
+optimizer1 = DistAdam(
     scalar_params + head_params + embed_params,
     lr=0.008,
     betas=(0.8, 0.95),
     eps=1e-8,
     weight_decay=0.0,
 )
-muon_optimizer = Muon(hidden_matrix_params + gate_params, lr=0.07, momentum=0.95, weight_decay=0.0)
-optimizers = [adam_optimizer, muon_optimizer]
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.05, momentum=0.95, weight_decay=0.0)
+optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
         group["initial_lr"] = group["lr"]
@@ -1426,6 +1438,7 @@ for step in range(train_steps + 1):
         val_steps = grad_accum_steps * args.val_tokens // args.val_batch_size
         val_loader = distributed_data_generator(args.val_files, args.val_batch_size, -1, grad_accum_steps=grad_accum_steps, align_to_bos=False)
         val_loss = 0
+        # val_loss = torch.zeros((), device=device, dtype=torch.float32)
         with torch.no_grad():
             for _ in range(val_steps):
                 inputs, targets, cum_seqlens = next(val_loader)
@@ -1452,13 +1465,19 @@ for step in range(train_steps + 1):
         inputs, targets, cum_seqlens = next(train_loader)
         model(inputs, targets, cum_seqlens, ws_short, ws_long).backward()
     # set optimization hyperparameters
-    for group in adam_optimizer.param_groups:
-        group["lr"] = group["initial_lr"] * get_lr(step)#, end=args.adam_lr_freeze_steps)
-    for group in muon_optimizer.param_groups:
-        group["lr"] = group["initial_lr"] * get_lr(step)
+    # for group in adam_optimizer.param_groups:
+    #     group["lr"] = group["initial_lr"] * get_lr(step)#, end=args.adam_lr_freeze_steps)
+    # for group in muon_optimizer.param_groups:
+    #     group["lr"] = group["initial_lr"] * get_lr(step)
+    #     frac = min(step / 300, 1) # momentum warmup for muon
+    #     group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
+    # step the optimizers
+    for opt in optimizers:
+        for group in opt.param_groups:
+            group["lr"] = group["initial_lr"] * get_lr(step)
+    for group in optimizer2.param_groups:
         frac = min(step / 300, 1) # momentum warmup for muon
         group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
-    # step the optimizers
     for opt in optimizers:
         opt.step()
     # null the gradients
