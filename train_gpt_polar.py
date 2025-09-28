@@ -1015,8 +1015,8 @@ class GPT(nn.Module):
         # U-net design by @brendanh0gan
         skip_connections = []
         skip_weights = torch.sigmoid(self.scalars[:(len(self.blocks) // 2)])
-        lambdas = self.scalars[1 * len(self.blocks): 3 * len(self.blocks)].view(-1, 2)
-        sa_lambdas = self.scalars[3 * len(self.blocks): 5 * len(self.blocks)].view(-1, 2)
+        lambdas = 15 * torch.sigmoid(self.scalars[1 * len(self.blocks): 3 * len(self.blocks)]).view(-1, 2)
+        sa_lambdas = 5 * torch.sigmoid(self.scalars[3 * len(self.blocks): 5 * len(self.blocks)]).view(-1, 2)
 
         n = len(self.blocks) // 2
 
