@@ -378,10 +378,8 @@ coeffs_list = [
     (4.042929935166739, -2.808917465908714, 0.5000178451051316),
     (3.8916678022926607, -2.772484153217685, 0.5060648178503393),
     (3.285753657755655, -2.3681294933425376, 0.46449024233003106),
-    (2.3005307116270957, -1.6111665557258406, 0.3833374427545279),
-    (1.9003834757310216, -1.2779237188293002, 0.37780315336362885)
+    (2.3465413258596377, -1.7097828382687081, 0.42323551169305323)
 ]
-
 
 @torch.compile(dynamic=False, fullgraph=True) # Must use dynamic=False or else it's much slower
 def polar_express(G: torch.Tensor):
@@ -1271,7 +1269,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 1625  # number of iterations to run
+    num_iterations: int = 1630  # number of iterations to run
     iteration_extension = 40  # number of iterations to continue training at final cooldown and window size
     cooldown_frac: int = 0.5  # fraction of training spent cooling down the learning rate
     # evaluation and logging
@@ -1369,7 +1367,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, weight_decay=0.0)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.05, momentum=0.95, weight_decay=0.0)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
