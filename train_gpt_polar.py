@@ -26,7 +26,7 @@ import torch.nn.functional as F
 # torch._inductor.config.coordinate_descent_tuning = True # we have banned this flag for new records because it causes compilation to take 30min
 import triton
 import triton.language as tl
-from flash_attn_interface import flash_attn_varlen_func
+from kernels import get_kernel
 from torch import Tensor, nn
 
 dynamo.config.recompile_limit = 64
@@ -858,6 +858,7 @@ class AttnArgs:
     sin: torch.Tensor
     attn_scale: float
 
+flash_attn_interface = get_kernel('varunneal/flash-attention-3').flash_attn_interface
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, dim: int, head_dim: int, num_heads: int):
@@ -909,7 +910,7 @@ class CausalSelfAttention(nn.Module):
         max_len = args.train_max_seq_len if self.training else (args.val_batch_size // (grad_accum_steps * world_size))
 
         # use flash_attn over flex_attn @varunneal. flash_attn_varlen suggested by @YouJiacheng
-        y = flash_attn_varlen_func(q[0], k[0], v[0], cu_seqlens_q=seqlens, cu_seqlens_k=seqlens, max_seqlen_q=max_len,
+        y = flash_attn_interface.flash_attn_varlen_func(q[0], k[0], v[0], cu_seqlens_q=seqlens, cu_seqlens_k=seqlens, max_seqlen_q=max_len,
                                    max_seqlen_k=max_len,
                                    causal=True, softmax_scale=attn_scale, window_size=(bm_size, 0))
         y = y.view(B, T, self.num_heads, self.head_dim)
