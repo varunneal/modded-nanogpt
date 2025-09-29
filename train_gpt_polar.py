@@ -375,11 +375,11 @@ def ba_plus_cAA(A: torch.Tensor, alpha: float, beta: float, out: torch.Tensor):
 
 # Computed for num_iters=5, safety_factor=1e-3, cushion=2
 coeffs_list = [
-    (8.077364675146127, -21.834776956153483, 15.12277849601372),
-    (4.004175379566768, -2.7280179090769603, 0.4761953005736679),
-    (3.85755983598289, -2.693347305150344, 0.4818099989723191),
-    (3.273058839254452, -2.313254659751231, 0.44381077119788304),
-    (2.3733342184008053, -1.7333896998439449, 0.4258016595630329)
+    (8.156554524902461, -22.48329292557795, 15.878769915207462),
+    (4.042929935166739, -2.808917465908714, 0.5000178451051316),
+    (3.8916678022926607, -2.772484153217685, 0.5060648178503393),
+    (3.285753657755655, -2.3681294933425376, 0.46449024233003106),
+    (2.3465413258596377, -1.7097828382687081, 0.42323551169305323)
 ]
 
 @torch.compile(dynamic=False, fullgraph=True) # Must use dynamic=False or else it's much slower
@@ -394,7 +394,7 @@ def polar_express(G: torch.Tensor):
         X = X.mT
 
     # Ensure spectral norm is at most 1
-    X = X / (X.norm(dim=(-2, -1), keepdim=True) * (1 + 3e-2) + 1e-6)
+    X = X / (X.norm(dim=(-2, -1), keepdim=True) * (1 + 2e-2) + 1e-6)
 
     # Allocate buffers
     X = X.contiguous()
@@ -1368,7 +1368,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.04, momentum=0.95, weight_decay=0.0)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.045, momentum=0.95, weight_decay=0.0)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
