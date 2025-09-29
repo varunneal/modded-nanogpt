@@ -394,7 +394,7 @@ def polar_express(G: torch.Tensor):
         X = X.mT
 
     # Ensure spectral norm is at most 1
-    X = X / (X.norm(dim=(-2, -1), keepdim=True) * (1 + 1e-3) + 1e-6)
+    X = X / (X.norm(dim=(-2, -1), keepdim=True) * (1 + 3e-2) + 1e-6)
 
     # Allocate buffers
     X = X.contiguous()
