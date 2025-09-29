@@ -375,11 +375,11 @@ def ba_plus_cAA(A: torch.Tensor, alpha: float, beta: float, out: torch.Tensor):
 
 # Computed for num_iters=5, safety_factor=1e-3, cushion=2
 coeffs_list = [
-    (8.311374241159353, -23.788014886474638, 17.444050175901257),
-    (4.118669045470973, -2.9716616705207164, 0.5493455255173311),
-    (3.958060479830816, -2.9315842642865806, 0.5563218271778839),
-    (3.309227719764991, -2.4766645359627995, 0.5070120603620015),
-    (2.2963842552753353, -1.6650721534087365, 0.4183932790811967)
+    (8.077364675146127, -21.834776956153483, 15.12277849601372),
+    (4.004175379566768, -2.7280179090769603, 0.4761953005736679),
+    (3.85755983598289, -2.693347305150344, 0.4818099989723191),
+    (3.273058839254452, -2.313254659751231, 0.44381077119788304),
+    (2.3733342184008053, -1.7333896998439449, 0.4258016595630329)
 ]
 
 @torch.compile(dynamic=False, fullgraph=True) # Must use dynamic=False or else it's much slower
@@ -1368,7 +1368,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.05, momentum=0.95, weight_decay=0.0)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.04, momentum=0.95, weight_decay=0.0)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
