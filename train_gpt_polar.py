@@ -1270,7 +1270,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 1615  # number of iterations to run
+    num_iterations: int = 1625  # number of iterations to run
     iteration_extension = 40  # number of iterations to continue training at final cooldown and window size
     cooldown_frac: int = 0.5  # fraction of training spent cooling down the learning rate
     # evaluation and logging
