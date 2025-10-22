@@ -583,7 +583,7 @@ class Muon(torch.optim.Optimizer):
                 v_chunk = updated_grads / (updated_grads.norm(dim=(-2, -1), keepdim=True) + 1e-6)
             else:
                 v_chunk = polar_express(updated_grads)
-
+            v_chunk = v_chunk.to(dtype=params[module_idx].dtype)
             # NorMuon: second_momentum_buffer tracks squared magnitude of processed gradients (https://arxiv.org/pdf/2510.05491)
             # v <- lr * v / sqrt(second_momentum) * ||v|| / ||v / sqrt(second_momentum)||
             v2 = v_chunk.square()
