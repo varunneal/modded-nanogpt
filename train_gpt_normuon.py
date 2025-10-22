@@ -504,8 +504,8 @@ class Muon(torch.optim.Optimizer):
 
     @torch.compile
     def adafactor_update(self, v_chunk, second_momentum_buffer_row, second_momentum_buffer_col, beta2: float):
-        # second_momentum_buffer approximates per-parameter variance by factoring into rowwise and colwise means
-        # Inspired by NorMuon (https://arxiv.org/pdf/2510.05491) and Adafactor (https://arxiv.org/pdf/1804.04235)
+        # Approximate per-parameter variance by factoring into rowwise and colwise means
+        # Inspired by Adafactor (https://arxiv.org/pdf/1804.04235) and NorMuon (https://arxiv.org/pdf/2510.05491)
         # v <- lr * v / sqrt(second_momentum) * ||v|| / ||v / sqrt(second_momentum)||
         v2 = v_chunk.square()
         v_mean_row = v2.mean(dim=-1, keepdim=True)
@@ -520,7 +520,7 @@ class Muon(torch.optim.Optimizer):
         c_factor = second_momentum_buffer_col.clamp_min(self.eps).rsqrt()
         numerator = second_momentum_buffer_row.mean(dim=-2, keepdim=True)
 
-        return (v_chunk * numerator * r_factor * c_factor).clamp_min(1e-3)
+        return (v_chunk * numerator * r_factor * c_factor)#.clamp_min(1e-3)
 
     @torch.no_grad()
     def step(self):
