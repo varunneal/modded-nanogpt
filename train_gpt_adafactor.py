@@ -513,11 +513,10 @@ class Muon(torch.optim.Optimizer):
         second_momentum_buffer_row.lerp_(v_mean_row, 1 - beta2)
         second_momentum_buffer_col.lerp_(v_mean_col, 1 - beta2)
 
-        second_momentum_buffer_row.mean(dim=-2, keepdim=True)
-
         r_factor = second_momentum_buffer_row.clamp_min(self.eps).rsqrt()
         c_factor = second_momentum_buffer_col.clamp_min(self.eps).rsqrt()
-        numerator = second_momentum_buffer_row.mean(dim=-2, keepdim=True)
+
+        numerator = second_momentum_buffer_row.mean(dim=-2, keepdim=True).sqrt()
 
         return grad * (numerator * r_factor * c_factor)
 
@@ -1315,7 +1314,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, beta2=0.99, weight_decay=0.01)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, beta2=0.98, weight_decay=0.01)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
