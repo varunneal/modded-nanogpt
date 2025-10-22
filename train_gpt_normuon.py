@@ -474,11 +474,8 @@ class Muon(torch.optim.Optimizer):
         param_groups = []
         for module_name, group_params in groups.items():
             chunk_size = (len(group_params) + self.world_size - 1) // self.world_size
-
-            param_groups.append({
-                "params": group_params,
-                "chunk_size": chunk_size
-            })
+            param_groups.append(dict(params=group_params, chunk_size=chunk_size, step=1))
+            
         return param_groups
     
     def generate_custom_param_groups(self, params):
@@ -497,9 +494,9 @@ class Muon(torch.optim.Optimizer):
         for size in group_sizes:
             chunk_size = (size + self.world_size - 1) // self.world_size
             group_params = params_list[idx: idx + size]
-
-            group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=reduce_future, step=0))
+            param_groups.append(dict(params=group_params, chunk_size=chunk_size, step=1))
             idx += size
+            
         return param_groups
 
     @torch.compile(dynamic=False)
@@ -534,7 +531,7 @@ class Muon(torch.optim.Optimizer):
                 grad_chunk, stacked_grads, op=dist.ReduceOp.AVG, async_op=True
             ).get_future()
 
-            group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=reduce_future, step=0))
+            group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=reduce_future))
 
         all_gather_infos = []
         # Second pass: wait for gradients, compute updates for the local shard of parameters,
