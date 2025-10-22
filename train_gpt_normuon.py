@@ -556,8 +556,8 @@ class Muon(torch.optim.Optimizer):
             updated_grads = grad_chunk[:num_params].lerp(momentum_buffer, group["momentum"])
     
             grad_shape = updated_grads.shape
-            # Reshape attn params from [hdim, dim*4] to [4,hdim,dim]            
             if params[module_idx].label == 'attn':
+                # Reshape attn params from [hdim, dim*4] to [4,hdim,dim]
                 for p in params[module_idx:module_idx + num_params]:
                     assert p.label == 'attn'
                 updated_grads = updated_grads.view(4 * grad_shape[0], grad_shape[1], grad_shape[2] // 4)
@@ -598,11 +598,9 @@ class Muon(torch.optim.Optimizer):
             
             inv_r = second_momentum_buffer_row.clamp_min(1e-10).rsqrt()  # (..., m, 1)
             inv_c = second_momentum_buffer_col.clamp_min(1e-10).rsqrt()  # (..., 1, n)
-            inv_s = inv_r * inv_c 
-
+            inv_s = inv_r * inv_c
             weighted_sum = (v2 * inv_s.square()).sum(dim=(-2, -1), keepdim=True)
             norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / weighted_sum.clamp_min(1e-20))
-            
             v_chunk.mul_(inv_s * norm_ratio)
             v_chunk = v_chunk.view(grad_shape)
             
@@ -830,8 +828,10 @@ class CausalSelfAttention(nn.Module):
             for head_idx in range(self.num_heads):
                 nn.init.orthogonal_(qkvo[0, head_idx])
                 nn.init.orthogonal_(qkvo[1, head_idx])
-                nn.init.zeros_(qkvo[2, head_idx])
-            nn.init.zeros_(qkvo[3, :])
+
+                qkvo[2, head_idx].zero_()
+                nn.init.eye_(qkvo[2, head_idx].narrow(-1, head_idx * self.head_dim, self.head_dim))
+            qkvo[3, :].zero_()
 
         # sparse gated attention to enable context based no-op by @classiclarryd
         self.attn_gate = CastedLinear(12, num_heads)
@@ -1307,7 +1307,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, beta2=0.99, weight_decay=0.01)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, beta2=0.98, weight_decay=0.01)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
