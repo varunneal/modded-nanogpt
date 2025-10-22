@@ -565,8 +565,6 @@ class Muon(torch.optim.Optimizer):
             chunk_size = group["chunk_size"]
             padded_num_params = chunk_size * self.world_size
 
-            updated_params = self.normuon_update(grad_chunk, params, chunk_size)
-
             start_idx = rank * chunk_size
             module_idx = start_idx if start_idx < len(params) else 0
 
