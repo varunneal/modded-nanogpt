@@ -619,7 +619,7 @@ class Muon(torch.optim.Optimizer):
                 updated_params[num_params:].zero_()
 
             stacked_params = torch.empty(
-                (padded_num_params, *p_shape),
+                (padded_num_params, *param_shape),
                 dtype=updated_params.dtype,
                 device=updated_params.device,
             )
