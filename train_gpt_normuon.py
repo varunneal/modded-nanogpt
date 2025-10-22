@@ -418,7 +418,7 @@ class Muon(torch.optim.Optimizer):
     Muon internally runs standard SGD-momentum, and then performs an orthogonalization post-
     processing step, in which each 2D parameter's update is replaced with the nearest orthogonal
     matrix. To efficiently orthogonalize each update, we use a Newton-Schulz iteration, which has
-    the advantage that it can be stably run in bfloat16 on the GPU. 
+    the advantage that it can be stably run in bfloat16 on the GPU.
     Note: A later PR replaced Newton-Shulz with Polar Express for the orthogonalization step
 
     Warning: This optimizer should not be used for the embedding layer, the final fully connected layer,
@@ -428,10 +428,10 @@ class Muon(torch.optim.Optimizer):
         This hyper-optimized class has faster execution time than the current impl of Adam for small params
 
     Custom distributed sizing:
-    The model stores all attn and mlp weights in the same shape, and then updates the view as 
-    needed on the forward pass. This enables attn and mlp weights to be contained within the same 
-    dist.reduce_scatter_tensor() call. The model architecture has been customized to enable 
-    (n_attn_layers+n_mlp_layers*2)%8==0 for batching across 8 GPUs with zero padding on mlp and attn. 
+    The model stores all attn and mlp weights in the same shape, and then updates the view as
+    needed on the forward pass. This enables attn and mlp weights to be contained within the same
+    dist.reduce_scatter_tensor() call. The model architecture has been customized to enable
+    (n_attn_layers+n_mlp_layers*2)%8==0 for batching across 8 GPUs with zero padding on mlp and attn.
     The scheduling is:
         1. reduce scatter smear_gate (1 param 7 padding params)
         2. reduce scatter attn_gate (10 params 6 padding params)
@@ -446,8 +446,9 @@ class Muon(torch.optim.Optimizer):
         9. wait for each all gather to complete and update params
     Empirically, leading with small params provides an additional 0.2s improvement.
     """
-    def __init__(self, params, lr=0.02, weight_decay=0.01, momentum=0.95, beta2=0.99, custom_sizing=True):
+    def __init__(self, params, lr=0.02, weight_decay=0.01, momentum=0.95, beta2=0.99, eps=1e-8, custom_sizing=True):
         defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, beta2=beta2)
+        self.eps = eps
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
         # custom sizing requires 8 GPUs
         if custom_sizing and dist.get_world_size()==8:
@@ -476,9 +477,9 @@ class Muon(torch.optim.Optimizer):
         for module_name, group_params in groups.items():
             chunk_size = (len(group_params) + self.world_size - 1) // self.world_size
             param_groups.append(dict(params=group_params, chunk_size=chunk_size, step=1))
-            
+
         return param_groups
-    
+
     def generate_custom_param_groups(self, params):
         """
         Implementation requires that a single GPU does not receive both attn
@@ -497,7 +498,7 @@ class Muon(torch.optim.Optimizer):
             group_params = params_list[idx: idx + size]
             param_groups.append(dict(params=group_params, chunk_size=chunk_size, step=1))
             idx += size
-            
+
         return param_groups
 
     @torch.compile(dynamic=False)
@@ -516,7 +517,7 @@ class Muon(torch.optim.Optimizer):
             num_params = len(params)
             chunk_size = group["chunk_size"]
             padded_num_params = chunk_size * self.world_size
-            
+
             stacked_grads = torch.empty(
                 (padded_num_params, *params[0].shape),
                 dtype=params[0].dtype,
@@ -544,17 +545,17 @@ class Muon(torch.optim.Optimizer):
             grad_chunk = info["grad_chunk"]
             chunk_size = group["chunk_size"]
             padded_num_params = chunk_size * self.world_size
-            
+
             start_idx = rank * chunk_size
             module_idx = start_idx if start_idx < len(params) else 0
 
             num_params = min(chunk_size, max(0, len(params) - start_idx))  # num params for this rank
-            
+
             momentum_buffer = group.setdefault("momentum_buffer", torch.zeros_like(grad_chunk[:num_params]))
             # Apply momentum update to the persistent momentum buffer in-place
             momentum_buffer.lerp_(grad_chunk[:num_params], 1 - group["momentum"])
             updated_grads = grad_chunk[:num_params].lerp(momentum_buffer, group["momentum"])
-    
+
             grad_shape = updated_grads.shape
             if params[module_idx].label == 'attn':
                 # Reshape attn params from [hdim, dim*4] to [4,hdim,dim]
@@ -562,7 +563,7 @@ class Muon(torch.optim.Optimizer):
                     assert p.label == 'attn'
                 updated_grads = updated_grads.view(4 * grad_shape[0], grad_shape[1], grad_shape[2] // 4)
             param_shape = grad_shape[1:]
-            
+
             # Adamw style correction on beta2
             # b2_corrected = (1. - group["beta2"] ** group["step"]) ** 0.5
             group["step"] += 1
@@ -580,42 +581,39 @@ class Muon(torch.optim.Optimizer):
                 v_chunk = updated_grads
             elif params[module_idx].label == "smear_gate":
                 # dividing by magnitude is equivalent of SVN for 1d tensors
-                v_chunk = updated_grads / (updated_grads.norm(dim=(-2, -1), keepdim=True) + 1e-6)
+                v_chunk = updated_grads / (updated_grads.norm(dim=(-2, -1), keepdim=True) + self.eps)
             else:
                 v_chunk = polar_express(updated_grads)
             v_chunk = v_chunk.to(dtype=params[module_idx].dtype)
-            # NorMuon: second_momentum_buffer tracks squared magnitude of processed gradients (https://arxiv.org/pdf/2510.05491)
+            # second_momentum_buffer approximates per-parameter variance by factoring into rowwise and colwise means
+            # Inspired by NorMuon (https://arxiv.org/pdf/2510.05491)
             # v <- lr * v / sqrt(second_momentum) * ||v|| / ||v / sqrt(second_momentum)||
             v2 = v_chunk.square()
             v_mean_row = v2.mean(dim=-1, keepdim=True)
             v_mean_col = v2.mean(dim=-2, keepdim=True)
-            
+
             second_momentum_buffer_row = group.setdefault("second_momentum_buffer_row", torch.zeros_like(v_mean_row))
             second_momentum_buffer_col = group.setdefault("second_momentum_buffer_col", torch.zeros_like(v_mean_col))
-            
+
             second_momentum_buffer_row.lerp_(v_mean_row, 1 - group["beta2"])
             second_momentum_buffer_col.lerp_(v_mean_col, 1 - group["beta2"])
-            
-            # inv_r = second_momentum_buffer_row.clamp_min(1e-10).rsqrt()  # (..., m, 1)
-            # inv_c = second_momentum_buffer_col.clamp_min(1e-10).rsqrt()  # (..., 1, n)
-            # inv_s = inv_r * inv_c
-            inv_r2 = second_momentum_buffer_row.clamp_min(1e-10).reciprocal()   # (..., m, 1)
-            inv_c2 = second_momentum_buffer_col.clamp_min(1e-10).reciprocal()   # (..., 1, n)
+
+            inv_r2 = second_momentum_buffer_row.clamp_min(self.eps).reciprocal()   # (..., m, 1)
+            inv_c2 = second_momentum_buffer_col.clamp_min(self.eps).reciprocal()   # (..., 1, n)
             denominator = ((v2 * inv_c2).sum(dim=-1, keepdim=True) * inv_r2).sum(dim=-2, keepdim=True)  # (..., 1, 1)
-            norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / denominator.clamp_min(1e-20))
-            # weighted_sum = (v2 * inv_s.square()).sum(dim=(-2, -1), keepdim=True)
-            # norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / weighted_sum.clamp_min(1e-20))
+            norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / denominator.clamp_min(self.eps))
+
             v_chunk.mul_(inv_r2.sqrt() * inv_c2.sqrt() * norm_ratio)
             v_chunk = v_chunk.view(grad_shape)
-            
+
             updated_params = torch.empty_like(grad_chunk)
             param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
-            
-            # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)            
+
+            # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
             mask = (v_chunk * param_chunk >= 0).to(dtype=v_chunk.dtype)
             v_chunk.add_(param_chunk * mask, alpha=eff_wd)
-            
-            # param <- param - lr * v            
+
+            # param <- param - lr * v
             param_chunk.add_(v_chunk, alpha=-eff_lr)
             updated_params[:num_params].copy_(param_chunk)
             if num_params < chunk_size:
@@ -626,7 +624,7 @@ class Muon(torch.optim.Optimizer):
                 dtype=updated_params.dtype,
                 device=updated_params.device,
             )
-            
+
             gather_future = dist.all_gather_into_tensor(
                 stacked_params, updated_params, async_op=True
             ).get_future()
@@ -699,7 +697,7 @@ class DistAdam(torch.optim.Optimizer):
                 lr = group['lr'] * getattr(param, "lr_mul", 1.0)
                 state = self.state[param]
                 g_slice = grad_slices[idx]
-                
+
                 exp_avg = state["exp_avg"]
                 exp_avg_sq = state["exp_avg_sq"]
                 state["step"] += 1
@@ -758,7 +756,7 @@ class Yarn(nn.Module):
         self.head_dim = head_dim
         self.max_seq_len = max_seq_len
         self.reset()
-        
+
     def reset(self):
         angular_freq = (1 / 1024) ** torch.linspace(0, 1, steps=self.head_dim//4, dtype=torch.float32, device=device)
         # half-truncate RoPE by @YouJiacheng (w/ base freq tuning)
@@ -863,7 +861,7 @@ class CausalSelfAttention(nn.Module):
         max_len = args.train_max_seq_len if self.training else (args.val_batch_size // (grad_accum_steps * world_size))
 
         # use flash_attn over flex_attn @varunneal. flash_attn_varlen suggested by @YouJiacheng
-        y = flash_attn_interface.flash_attn_varlen_func(q[0], k[0], v[0], cu_seqlens_q=seqlens, cu_seqlens_k=seqlens, 
+        y = flash_attn_interface.flash_attn_varlen_func(q[0], k[0], v[0], cu_seqlens_q=seqlens, cu_seqlens_k=seqlens,
                                                         max_seqlen_q=max_len, max_seqlen_k=max_len,
                                                         causal=True, softmax_scale=attn_scale, window_size=(bm_size, 0))
         y = y.view(B, T, self.num_heads, self.head_dim)
@@ -1070,12 +1068,12 @@ class BOSFinder:
     def _load(self):
         self.bos_idx_async = (self.tokens == BOS_ID).nonzero(as_tuple=True)[0].to(torch.int64).cpu().numpy()
         self.ready.set()
-    
+
     def start(self):
         self.ready.clear()
         self.thread = threading.Thread(target=self._load)
         self.thread.start()
-    
+
     def get(self):
         if self.thread:
             self.ready.wait()
@@ -1118,17 +1116,17 @@ class DataPreloader:
         self.thread = None
         self.data = None
         self.ready = threading.Event()
-    
+
     def _load(self):
         tokens = _load_data_shard(next(self.file_iter))
         self.data = (tokens, BOSFinder(tokens, self.world_size))
         self.ready.set()
-    
+
     def start(self):
         self.ready.clear()
         self.thread = threading.Thread(target=self._load)
         self.thread.start()
-    
+
     def get(self):
         if self.thread:
             self.ready.wait()
@@ -1391,7 +1389,7 @@ for step in range(warmup_steps):
         model.yarn.reset()
         ws_long = args.ws_schedule[0]
     else:
-        new_ws_long = args.ws_schedule[ws_idx]  
+        new_ws_long = args.ws_schedule[ws_idx]
         if new_ws_long > ws_long:
             model.yarn.apply(ws_long, new_ws_long)
             ws_long = new_ws_long
@@ -1464,7 +1462,7 @@ for step in range(train_steps + 1):
         loss += model(inputs, targets, cum_seqlens, ws_short, ws_long) / grad_accum_steps
     loss.backward()
     step_optimizers(step, optimizers, model)
-     
+
     # logging
     approx_training_time_ms = training_time_ms + 1000 * (time.perf_counter() - t0)
     print0(f"step:{step+1}/{train_steps} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
