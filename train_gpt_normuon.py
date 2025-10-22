@@ -596,12 +596,16 @@ class Muon(torch.optim.Optimizer):
             second_momentum_buffer_row.lerp_(v_mean_row, 1 - group["beta2"])
             second_momentum_buffer_col.lerp_(v_mean_col, 1 - group["beta2"])
             
-            inv_r = second_momentum_buffer_row.clamp_min(1e-10).rsqrt()  # (..., m, 1)
-            inv_c = second_momentum_buffer_col.clamp_min(1e-10).rsqrt()  # (..., 1, n)
-            inv_s = inv_r * inv_c
-            weighted_sum = (v2 * inv_s.square()).sum(dim=(-2, -1), keepdim=True)
-            norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / weighted_sum.clamp_min(1e-20))
-            v_chunk.mul_(inv_s * norm_ratio)
+            # inv_r = second_momentum_buffer_row.clamp_min(1e-10).rsqrt()  # (..., m, 1)
+            # inv_c = second_momentum_buffer_col.clamp_min(1e-10).rsqrt()  # (..., 1, n)
+            # inv_s = inv_r * inv_c
+            inv_r2 = second_momentum_buffer_row.clamp_min(1e-10).reciprocal()   # (..., m, 1)
+            inv_c2 = second_momentum_buffer_col.clamp_min(1e-10).reciprocal()   # (..., 1, n)
+            denominator = ((v2 * inv_c2).sum(dim=-1, keepdim=True) * inv_r2).sum(dim=-2, keepdim=True)  # (..., 1, 1)
+            norm_ratio = v2.sum(dim=(-2, -1), keepdim=True) * denominator.clamp_min(1e-20).rsqrt()
+            # weighted_sum = (v2 * inv_s.square()).sum(dim=(-2, -1), keepdim=True)
+            # norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / weighted_sum.clamp_min(1e-20))
+            v_chunk.mul_(inv_r2.sqrt() * inv_c2.sqrt() * norm_ratio)
             v_chunk = v_chunk.view(grad_shape)
             
             updated_params = torch.empty_like(grad_chunk)
@@ -1307,7 +1311,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, beta2=0.98, weight_decay=0.01)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, beta2=0.97, weight_decay=0.01)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
