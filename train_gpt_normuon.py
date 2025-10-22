@@ -602,7 +602,7 @@ class Muon(torch.optim.Optimizer):
             inv_r2 = second_momentum_buffer_row.clamp_min(1e-10).reciprocal()   # (..., m, 1)
             inv_c2 = second_momentum_buffer_col.clamp_min(1e-10).reciprocal()   # (..., 1, n)
             denominator = ((v2 * inv_c2).sum(dim=-1, keepdim=True) * inv_r2).sum(dim=-2, keepdim=True)  # (..., 1, 1)
-            norm_ratio = v2.sum(dim=(-2, -1), keepdim=True) * denominator.clamp_min(1e-20).rsqrt()
+            norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / denominator.clamp_min(1e-20))
             # weighted_sum = (v2 * inv_s.square()).sum(dim=(-2, -1), keepdim=True)
             # norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / weighted_sum.clamp_min(1e-20))
             v_chunk.mul_(inv_r2.sqrt() * inv_c2.sqrt() * norm_ratio)
