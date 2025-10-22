@@ -605,8 +605,8 @@ class Muon(torch.optim.Optimizer):
                 v_chunk = polar_express(updated_grads)
             v_chunk = v_chunk.to(dtype=params[module_idx].dtype)
 
-            second_momentum_buffer_row = group.setdefault("second_momentum_buffer_row", torch.zeros_like(v_chunk[..., :1, :]))
-            second_momentum_buffer_col = group.setdefault("second_momentum_buffer_col", torch.zeros_like(v_chunk[..., :, :1]))
+            second_momentum_buffer_row = group.setdefault("second_momentum_buffer_row", torch.zeros_like(v_chunk[..., :, :1]))
+            second_momentum_buffer_col = group.setdefault("second_momentum_buffer_col", torch.zeros_like(v_chunk[..., :1, :]))
 
             v_chunk = self.normuon_update(v_chunk, second_momentum_buffer_row, second_momentum_buffer_col, group["beta2"])
             v_chunk = v_chunk.view(grad_shape)
