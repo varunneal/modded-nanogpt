@@ -446,7 +446,7 @@ class Muon(torch.optim.Optimizer):
     Empirically, leading with small params provides an additional 0.2s improvement.
     """
     def __init__(self, params, lr=0.02, weight_decay=0.01, momentum=0.95, beta2=0.99, custom_sizing=True):
-        defaults = dict(lr=lr, weight_decay=weight_decay, momentumm=momenutm, beta2=beta2)
+        defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, beta2=beta2)
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
         # custom sizing requires 8 GPUs
         if custom_sizing and dist.get_world_size()==8:
