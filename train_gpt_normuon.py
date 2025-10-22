@@ -552,8 +552,8 @@ class Muon(torch.optim.Optimizer):
             
             momentum_buffer = group.setdefault("momentum_buffer", torch.zeros_like(grad_chunk[:num_params]))
             # Apply momentum update to the persistent momentum buffer in-place
-            momentum_buffer.lerp_(grad_chunk, 1 - group["momentum"])
-            updated_grads = grad_chunk[:num_params].lerp(momentum_buffer[:num_params], group["momentum"])
+            momentum_buffer.lerp_(grad_chunk[:num_params], 1 - group["momentum"])
+            updated_grads = grad_chunk[:num_params].lerp(momentum_buffer, group["momentum"])
     
             grad_shape = updated_grads.shape
             # Reshape attn params from [hdim, dim*4] to [4,hdim,dim]            
