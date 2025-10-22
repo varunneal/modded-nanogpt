@@ -503,9 +503,9 @@ class Muon(torch.optim.Optimizer):
         return param_groups
 
     @torch.compile
-    def normuon_update(self, v_chunk, second_momentum_buffer_row, second_momentum_buffer_col, beta2: float):
+    def adafactor_update(self, v_chunk, second_momentum_buffer_row, second_momentum_buffer_col, beta2: float):
         # second_momentum_buffer approximates per-parameter variance by factoring into rowwise and colwise means
-        # Inspired by NorMuon (https://arxiv.org/pdf/2510.05491)
+        # Inspired by NorMuon (https://arxiv.org/pdf/2510.05491) and Adafactor (https://arxiv.org/pdf/1804.04235)
         # v <- lr * v / sqrt(second_momentum) * ||v|| / ||v / sqrt(second_momentum)||
         v2 = v_chunk.square()
         v_mean_row = v2.mean(dim=-1, keepdim=True)
@@ -514,12 +514,13 @@ class Muon(torch.optim.Optimizer):
         second_momentum_buffer_row.lerp_(v_mean_row, 1 - beta2)
         second_momentum_buffer_col.lerp_(v_mean_col, 1 - beta2)
 
-        inv_r2 = second_momentum_buffer_row.clamp_min(self.eps).reciprocal()   # (..., m, 1)
-        inv_c2 = second_momentum_buffer_col.clamp_min(self.eps).reciprocal()   # (..., 1, n)
-        denominator = ((v2 * inv_c2).sum(dim=-1, keepdim=True) * inv_r2).sum(dim=-2, keepdim=True)  # (..., 1, 1)
-        norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / denominator.clamp_min(self.eps))
+        second_momentum_buffer_row.mean(dim=-2, keepdim=True)
 
-        return v_chunk * inv_r2.sqrt() * inv_c2.sqrt() * norm_ratio
+        r_factor = second_momentum_buffer_row.clamp_min(self.eps).rsqrt()
+        c_factor = second_momentum_buffer_col.clamp_min(self.eps).rsqrt()
+        numerator = second_momentum_buffer_row.mean(dim=-2, keepdim=True)
+
+        return (v_chunk * numerator * r_factor * c_factor).clamp_min(1e-3)
 
     @torch.no_grad()
     def step(self):
@@ -600,7 +601,7 @@ class Muon(torch.optim.Optimizer):
                 v_chunk = updated_grads
             elif params[module_idx].label == "smear_gate":
                 # dividing by magnitude is equivalent of SVN for 1d tensors
-                v_chunk = updated_grads / (updated_grads.norm(dim=(-2, -1), keepdim=True) + self.eps)
+                v_chunk = updated_grads / (updated_grads.norm(dim=(-2, -1), keepdim=True).clamp_min(self.eps))
             else:
                 v_chunk = polar_express(updated_grads)
             v_chunk = v_chunk.to(dtype=params[module_idx].dtype)
@@ -608,7 +609,7 @@ class Muon(torch.optim.Optimizer):
             second_momentum_buffer_row = group.setdefault("second_momentum_buffer_row", torch.zeros_like(v_chunk[..., :, :1]))
             second_momentum_buffer_col = group.setdefault("second_momentum_buffer_col", torch.zeros_like(v_chunk[..., :1, :]))
 
-            v_chunk = self.normuon_update(v_chunk, second_momentum_buffer_row, second_momentum_buffer_col, group["beta2"])
+            v_chunk = self.adafactor_update(v_chunk, second_momentum_buffer_row, second_momentum_buffer_col, group["beta2"])
             v_chunk = v_chunk.view(grad_shape)
 
             updated_params = torch.empty_like(grad_chunk)
