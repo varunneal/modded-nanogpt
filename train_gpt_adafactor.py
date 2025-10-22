@@ -1315,7 +1315,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, beta2=0.98, weight_decay=0.01)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, beta2=0.99, weight_decay=0.01)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
