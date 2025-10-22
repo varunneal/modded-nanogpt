@@ -374,6 +374,7 @@ polar_express_coeffs = [
     (2.3465413258596377, -1.7097828382687081, 0.42323551169305323)
 ]
 
+@torch.compile(dynamic=False, fullgraph=True) # Must use dynamic=False or else it's much slower
 def polar_express(G: torch.Tensor):
     """
     Polar Express Sign Method: https://arxiv.org/pdf/2505.16932
@@ -501,7 +502,25 @@ class Muon(torch.optim.Optimizer):
 
         return param_groups
 
-    @torch.compile(dynamic=False)
+    @torch.compile
+    def normuon_update(self, v_chunk, second_momentum_buffer_row, second_momentum_buffer_col, beta2: float):
+        # second_momentum_buffer approximates per-parameter variance by factoring into rowwise and colwise means
+        # Inspired by NorMuon (https://arxiv.org/pdf/2510.05491)
+        # v <- lr * v / sqrt(second_momentum) * ||v|| / ||v / sqrt(second_momentum)||
+        v2 = v_chunk.square()
+        v_mean_row = v2.mean(dim=-1, keepdim=True)
+        v_mean_col = v2.mean(dim=-2, keepdim=True)
+
+        second_momentum_buffer_row.lerp_(v_mean_row, 1 - beta2)
+        second_momentum_buffer_col.lerp_(v_mean_col, 1 - beta2)
+
+        inv_r2 = second_momentum_buffer_row.clamp_min(self.eps).reciprocal()   # (..., m, 1)
+        inv_c2 = second_momentum_buffer_col.clamp_min(self.eps).reciprocal()   # (..., 1, n)
+        denominator = ((v2 * inv_c2).sum(dim=-1, keepdim=True) * inv_r2).sum(dim=-2, keepdim=True)  # (..., 1, 1)
+        norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / denominator.clamp_min(self.eps))
+
+        return v_chunk * inv_r2.sqrt() * inv_c2.sqrt() * norm_ratio
+
     @torch.no_grad()
     def step(self):
         # Efficient systems-wise implementation of step developed by @YouJiacheng,
@@ -514,7 +533,6 @@ class Muon(torch.optim.Optimizer):
             if not params:
                 continue
 
-            num_params = len(params)
             chunk_size = group["chunk_size"]
             padded_num_params = chunk_size * self.world_size
 
@@ -523,9 +541,10 @@ class Muon(torch.optim.Optimizer):
                 dtype=params[0].dtype,
                 device=params[0].device
             )
-            stacked_grads[:num_params] = torch.stack([p.grad for p in params])
-            if num_params < padded_num_params:
-                stacked_grads[num_params:].zero_()
+            for i, p in enumerate(params):
+                stacked_grads[i].copy_(p.grad)
+            if len(params) < padded_num_params:
+                stacked_grads[len(params):].zero_()
 
             grad_chunk = torch.empty_like(stacked_grads[:chunk_size])
 
@@ -545,6 +564,8 @@ class Muon(torch.optim.Optimizer):
             grad_chunk = info["grad_chunk"]
             chunk_size = group["chunk_size"]
             padded_num_params = chunk_size * self.world_size
+
+            updated_params = self.compute_update(grad_chunk, params, chunk_size)
 
             start_idx = rank * chunk_size
             module_idx = start_idx if start_idx < len(params) else 0
@@ -585,33 +606,20 @@ class Muon(torch.optim.Optimizer):
             else:
                 v_chunk = polar_express(updated_grads)
             v_chunk = v_chunk.to(dtype=params[module_idx].dtype)
-            # second_momentum_buffer approximates per-parameter variance by factoring into rowwise and colwise means
-            # Inspired by NorMuon (https://arxiv.org/pdf/2510.05491)
-            # v <- lr * v / sqrt(second_momentum) * ||v|| / ||v / sqrt(second_momentum)||
-            v2 = v_chunk.square()
-            v_mean_row = v2.mean(dim=-1, keepdim=True)
-            v_mean_col = v2.mean(dim=-2, keepdim=True)
 
-            second_momentum_buffer_row = group.setdefault("second_momentum_buffer_row", torch.zeros_like(v_mean_row))
-            second_momentum_buffer_col = group.setdefault("second_momentum_buffer_col", torch.zeros_like(v_mean_col))
+            second_momentum_buffer_row = group.setdefault("second_momentum_buffer_row", torch.zeros_like(v_chunk[..., :1, :]))
+            second_momentum_buffer_col = group.setdefault("second_momentum_buffer_col", torch.zeros_like(v_chunk[..., :, :1]))
 
-            second_momentum_buffer_row.lerp_(v_mean_row, 1 - group["beta2"])
-            second_momentum_buffer_col.lerp_(v_mean_col, 1 - group["beta2"])
-
-            inv_r2 = second_momentum_buffer_row.clamp_min(self.eps).reciprocal()   # (..., m, 1)
-            inv_c2 = second_momentum_buffer_col.clamp_min(self.eps).reciprocal()   # (..., 1, n)
-            denominator = ((v2 * inv_c2).sum(dim=-1, keepdim=True) * inv_r2).sum(dim=-2, keepdim=True)  # (..., 1, 1)
-            norm_ratio = torch.sqrt(v2.sum(dim=(-2, -1), keepdim=True) / denominator.clamp_min(self.eps))
-
-            v_chunk.mul_(inv_r2.sqrt() * inv_c2.sqrt() * norm_ratio)
+            v_chunk = self.normuon_update(v_chunk, second_momentum_buffer_row, second_momentum_buffer_col, group["beta2"])
             v_chunk = v_chunk.view(grad_shape)
 
             updated_params = torch.empty_like(grad_chunk)
             param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
 
             # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
-            mask = (v_chunk * param_chunk >= 0).to(dtype=v_chunk.dtype)
-            v_chunk.add_(param_chunk * mask, alpha=eff_wd)
+            same_sign = torch.signbit(v_chunk) == torch.signbit(param_chunk)
+            wd_term = torch.where(same_sign, param_chunk, param_chunk.new_zeros(()))
+            v_chunk.add_(wd_term, alpha=eff_wd)
 
             # param <- param - lr * v
             param_chunk.add_(v_chunk, alpha=-eff_lr)
@@ -1309,7 +1317,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, beta2=0.97, weight_decay=0.01)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, beta2=0.98, weight_decay=0.01)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
