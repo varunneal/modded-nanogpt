@@ -604,8 +604,6 @@ class Muon(torch.optim.Optimizer):
             
             v_chunk.mul_(inv_s * norm_ratio)
             v_chunk = v_chunk.view(grad_shape)
-            # param <- param - lr * v
-            param_chunk.add_(v_chunk, alpha=-eff_lr_val)
             
             updated_params = torch.empty_like(momentum_buffer)
             param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
@@ -614,6 +612,7 @@ class Muon(torch.optim.Optimizer):
             mask = (v_chunk * param_chunk >= 0).to(dtype=v_chunk.dtype)
             v_chunk.add_(param_chunk * mask, alpha=eff_wd)
             
+            # param <- param - lr * v            
             param_chunk.add_(v_chunk, alpha=-eff_lr)
             updated_params[:num_params].copy_(param_chunk)
             if num_params < chunk_size:
