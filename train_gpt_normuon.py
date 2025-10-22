@@ -552,7 +552,7 @@ class Muon(torch.optim.Optimizer):
 
             params = group["params"]
             grad_chunk = info["grad_chunk"]
-            chunk_size = info["chunk_size"]
+            chunk_size = group["chunk_size"]
             padded_num_params = chunk_size * self.world_size
             
             start_idx = rank * chunk_size
