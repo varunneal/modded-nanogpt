@@ -839,8 +839,8 @@ class CausalSelfAttention(nn.Module):
             for head_idx in range(self.num_heads):
                 nn.init.orthogonal_(qkvo[0, head_idx])
                 nn.init.orthogonal_(qkvo[1, head_idx])
-                nn.init.zero_(qkvo[2, head_idx])
-            nn.init.zero_(qkvo[3, :])
+                nn.init.zeros_(qkvo[2, head_idx])
+            nn.init.zeros_(qkvo[3, :])
 
         # sparse gated attention to enable context based no-op by @classiclarryd
         self.attn_gate = CastedLinear(12, num_heads)
