@@ -564,14 +564,14 @@ class Muon(torch.optim.Optimizer):
             param_shape = grad_shape[1:]
             
             # Adamw style correction on beta2
-            b2_corrected = (1. - group["beta2"] ** group["step"]) ** 0.5
+            # b2_corrected = (1. - group["beta2"] ** group["step"]) ** 0.5
             group["step"] += 1
             # Determine LR and WD once per group, assuming constant for params in group.
             eff_lr = (
                     group["lr"]
                     * max(1., param_shape[-2] / param_shape[-1]) ** 0.5
                     * getattr(params[module_idx], "lr_mul", 1.0)
-                    * b2_corrected
+                    # * b2_corrected
             )
             eff_wd = group["weight_decay"] * getattr(params[module_idx], "wd_mul", 1.0)
 
