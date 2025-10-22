@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from collections import defaultdic
 from itertools import accumulate
 from pathlib import Path
 
@@ -605,7 +606,7 @@ class Muon(torch.optim.Optimizer):
             v_chunk.mul_(inv_s * norm_ratio)
             v_chunk = v_chunk.view(grad_shape)
             
-            updated_params = torch.empty_like(momentum_buffer)
+            updated_params = torch.empty_like(grad_chunk)
             param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
             
             # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)            
