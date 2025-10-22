@@ -556,6 +556,8 @@ class Muon(torch.optim.Optimizer):
             padded_num_params = chunk_size * self.world_size
             
             start_idx = rank * chunk_size
+            module_idx = start_idx if start_idx < len(params) else 0
+
             num_params = min(chunk_size, max(0, len(params) - start_idx))  # num params for this rank
             
             momentum_buffer = group.setdefault("momentum_buffer", torch.zeros_like(grad_chunk[:num_params]))
