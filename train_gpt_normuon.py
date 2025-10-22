@@ -10,7 +10,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from collections import defaultdic
+from collections import defaultdict
 from itertools import accumulate
 from pathlib import Path
 
