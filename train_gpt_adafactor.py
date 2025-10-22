@@ -503,10 +503,10 @@ class Muon(torch.optim.Optimizer):
         return param_groups
 
     @torch.compile
-    def adafactor_update(self, v_chunk, second_momentum_buffer_row, second_momentum_buffer_col, beta2: float):
+    def adafactor_update(self, grad, second_momentum_buffer_row, second_momentum_buffer_col, beta2: float):
         # Approximate per-parameter variance by factoring into rowwise and colwise means
         # Inspired by Adafactor (https://arxiv.org/pdf/1804.04235) and NorMuon (https://arxiv.org/pdf/2510.05491)
-        v2 = v_chunk.square()
+        v2 = grad.square()
         v_mean_row = v2.mean(dim=-1, keepdim=True)
         v_mean_col = v2.mean(dim=-2, keepdim=True)
 
@@ -519,7 +519,7 @@ class Muon(torch.optim.Optimizer):
         c_factor = second_momentum_buffer_col.clamp_min(self.eps).rsqrt()
         numerator = second_momentum_buffer_row.mean(dim=-2, keepdim=True)
 
-        return v_chunk * (numerator * r_factor * c_factor)
+        return grad * (numerator * r_factor * c_factor)
 
     @torch.no_grad()
     def step(self):
@@ -583,6 +583,11 @@ class Muon(torch.optim.Optimizer):
                 updated_grads = updated_grads.view(4 * grad_shape[0], grad_shape[1], grad_shape[2] // 4)
             param_shape = grad_shape[1:]
 
+            second_momentum_buffer_row = group.setdefault("second_momentum_buffer_row", torch.zeros_like(updated_grads[..., :, :1]))
+            second_momentum_buffer_col = group.setdefault("second_momentum_buffer_col", torch.zeros_like(updated_grads[..., :1, :]))
+
+            updated_grads = self.adafactor_update(updated_grads, second_momentum_buffer_row, second_momentum_buffer_col, group["beta2"])
+
             # Adamw style correction on beta2
             # b2_corrected = (1. - group["beta2"] ** group["step"]) ** 0.5
             group["step"] += 1
@@ -603,12 +608,7 @@ class Muon(torch.optim.Optimizer):
                 v_chunk = updated_grads / (updated_grads.norm(dim=(-2, -1), keepdim=True).clamp_min(self.eps))
             else:
                 v_chunk = polar_express(updated_grads)
-            v_chunk = v_chunk.to(dtype=params[module_idx].dtype)
-
-            second_momentum_buffer_row = group.setdefault("second_momentum_buffer_row", torch.zeros_like(v_chunk[..., :, :1]))
-            second_momentum_buffer_col = group.setdefault("second_momentum_buffer_col", torch.zeros_like(v_chunk[..., :1, :]))
-
-            v_chunk = self.adafactor_update(v_chunk, second_momentum_buffer_row, second_momentum_buffer_col, group["beta2"])
+            # v_chunk = v_chunk.to(dtype=params[module_idx].dtype)
             v_chunk = v_chunk.view(grad_shape)
 
             updated_params = torch.empty_like(grad_chunk)
