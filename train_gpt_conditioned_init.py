@@ -877,7 +877,7 @@ class MLP(nn.Module):
         # corrective factor to account for transpose
         self.c_fc.lr_mul = 2.
 
-        std = (2 ** 0.5) * (dim ** -0.5)
+        std = 0.5 * (dim ** -0.5)
         bound = (3 ** 0.5) * std # improved init scale by @YouJiacheng
 
         with torch.no_grad():
