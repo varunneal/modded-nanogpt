@@ -374,7 +374,7 @@ polar_express_coeffs = [
     (2.3465413258596377, -1.7097828382687081, 0.42323551169305323)
 ]
 
-@torch.compile(dynamic=False, fullgraph=True) # Must use dynamic=False or else it's much slower
+# @torch.compile(dynamic=False, fullgraph=True) # Must use dynamic=False or else it's much slower
 def polar_express(G: torch.Tensor):
     """
     Polar Express Sign Method: https://arxiv.org/pdf/2505.16932
@@ -500,6 +500,7 @@ class Muon(torch.optim.Optimizer):
 
         return param_groups
 
+    @torch.compile(dynamic=False) # Must use dynamic=False or else it's much slower
     @torch.no_grad()
     def step(self):
         # Efficient systems-wise implementation of step developed by @YouJiacheng,
@@ -1289,7 +1290,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.01)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.035, momentum=0.95, beta2=0.95, weight_decay=0.01)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
