@@ -1253,7 +1253,7 @@ logfile = None
 if master_process:
     run_id = args.run_id
     os.makedirs("logs", exist_ok=True)
-    logfile = f"logs/lr03_{run_id}.txt"
+    logfile = f"logs/uniform_lr03_{run_id}.txt"
     print(logfile)
 def print0(s, console=False):
     if master_process:
