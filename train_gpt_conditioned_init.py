@@ -877,8 +877,13 @@ class MLP(nn.Module):
         # corrective factor to account for transpose
         self.c_fc.lr_mul = 2.
 
+        std = (2 ** 0.5) * (dim ** -0.5)
+        bound = (3 ** 0.5) * std # improved init scale by @YouJiacheng
+
         with torch.no_grad():
-            nn.init.orthogonal_(self.c_fc, gain=2 ** 0.5)
+            # nn.init.orthogonal_(self.c_fc, gain=2 ** 0.5)
+            self.c_fc.uniform_(-bound, bound)
+
             nn.init.zeros_(self.c_proj)  # zero init suggested by @Grad62304977
 
     def forward(self, x: Tensor):
@@ -1213,7 +1218,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 2240
+    num_iterations: int = 2250
     lr_schedule = (0.5, 0.98)    # breakpoints for 3-part schedule: (flat, linear decay, flat)
     lr_min = 0.1
     # evaluation and logging
