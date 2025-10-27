@@ -820,11 +820,9 @@ class CausalSelfAttention(nn.Module):
         with torch.no_grad():
             qkvo = self.qkvo_w.view(4, self.num_heads, self.head_dim, self.dim)
             # Conditioned Initialization reduces spread of singular values - https://openreview.net/pdf?id=cKNOCYPo2W
-            gain = 2. ** 0.5
-
             for head_idx in range(self.num_heads):
-                nn.init.orthogonal_(qkvo[0, head_idx], gain=gain)
-                nn.init.orthogonal_(qkvo[1, head_idx], gain=gain)
+                nn.init.orthogonal_(qkvo[0, head_idx])
+                nn.init.orthogonal_(qkvo[1, head_idx])
 
                 qkvo[2, head_idx].zero_()
                 nn.init.eye_(qkvo[2, head_idx].narrow(-1, head_idx * self.head_dim, self.head_dim))
@@ -1251,7 +1249,7 @@ logfile = None
 if master_process:
     run_id = args.run_id
     os.makedirs("logs", exist_ok=True)
-    logfile = f"logs/ortho_gain_lr03_{run_id}.txt"
+    logfile = f"logs/{run_id}.txt"
     print(logfile)
 def print0(s, console=False):
     if master_process:
