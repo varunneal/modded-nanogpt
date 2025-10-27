@@ -552,7 +552,7 @@ class Muon(torch.optim.Optimizer):
             momentum_buffer = group.setdefault("momentum_buffer", torch.zeros_like(grad_chunk[:num_params]))
             # Apply momentum update to the persistent momentum buffer in-place
             momentum_buffer.lerp_(grad_chunk[:num_params], 1 - group["momentum"])
-            updated_grads = grad_chunk[:num_params].lerp(momentum_buffer, group["momentum"])
+            updated_grads = grad_chunk[:num_params].lerp_(momentum_buffer, group["momentum"])
 
             grad_shape = updated_grads.shape
             if params[module_idx].label == 'attn':
@@ -560,8 +560,8 @@ class Muon(torch.optim.Optimizer):
                 for p in params[module_idx:module_idx + num_params]:
                     assert p.label == 'attn'
                 updated_grads = updated_grads.view(4 * grad_shape[0], grad_shape[1], grad_shape[2] // 4)
-            param_shape = grad_shape[1:]
-            param_dtype = params[module_idx].dtype
+            ref_param = params[module_idx]
+            param_shape = ref_param.shape
 
             second_momentum_buffer = group.setdefault("second_momentum_buffer",
                 torch.zeros_like(updated_grads[..., :, :1]) if param_shape[-2] >= param_shape[-1] else
@@ -571,12 +571,12 @@ class Muon(torch.optim.Optimizer):
             # Determine LR and WR
             eff_lr = group["lr"] * group.setdefault("eff_lr",
                 max(1., param_shape[-2] / param_shape[-1]) ** 0.5
-                * torch.tensor(
+                * ref_param.new_tensor(
                     [getattr(param, "lr_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
                 ).view(-1, 1, 1)
             )
             eff_wd = group["weight_decay"] * group.setdefault("eff_wd",
-                torch.tensor(
+                ref_param.new_tensor(
                     [getattr(param, "wd_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
                 ).view(-1, 1, 1)
             )
@@ -593,11 +593,11 @@ class Muon(torch.optim.Optimizer):
             # NorMuon: second_momentum_buffer tracks squared magnitude of gradients along one dim (https://arxiv.org/pdf/2510.05491)
             v_norm = v_chunk.norm(dim=(-2, -1), keepdim=True)
             v_mean = v_chunk.square().mean(dim=-1 if param_shape[-2] >= param_shape[-1] else -2, keepdim=True)
-            second_momentum_buffer.lerp_(v_mean.to(dtype=param_dtype), 1 - group["beta2"])
-            step_size = second_momentum_buffer.clamp_min_(1e-10).rsqrt_()
+            second_momentum_buffer.lerp_(v_mean.to(dtype=ref_param.dtype), 1 - group["beta2"])
+            step_size = second_momentum_buffer.clamp_min(1e-10).rsqrt_()
             v_chunk.mul_(step_size)
             v_norm_new = v_chunk.norm(dim=(-2, -1), keepdim=True)
-            v_chunk.mul_(v_norm / v_norm_new.clamp_min(1e-10))
+            v_chunk.mul_(v_norm / v_norm_new.clamp_min_(1e-10))
 
             v_chunk = v_chunk.view(grad_shape)
 
@@ -1206,7 +1206,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 2295
+    num_iterations: int = 2290
     lr_schedule = (0.5, 0.98)    # breakpoints for 3-part schedule: (flat, linear decay, flat)
     lr_min = 0.1
     # evaluation and logging

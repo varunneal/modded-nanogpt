@@ -552,7 +552,7 @@ class Muon(torch.optim.Optimizer):
             momentum_buffer = group.setdefault("momentum_buffer", torch.zeros_like(grad_chunk[:num_params]))
             # Apply momentum update to the persistent momentum buffer in-place
             momentum_buffer.lerp_(grad_chunk[:num_params], 1 - group["momentum"])
-            updated_grads = grad_chunk[:num_params].lerp(momentum_buffer, group["momentum"])
+            updated_grads = grad_chunk[:num_params].lerp_(momentum_buffer, group["momentum"])
 
             grad_shape = updated_grads.shape
             if params[module_idx].label == 'attn':
@@ -594,10 +594,10 @@ class Muon(torch.optim.Optimizer):
             v_norm = v_chunk.norm(dim=(-2, -1), keepdim=True)
             v_mean = v_chunk.square().mean(dim=-1 if param_shape[-2] >= param_shape[-1] else -2, keepdim=True)
             second_momentum_buffer.lerp_(v_mean.to(dtype=ref_param.dtype), 1 - group["beta2"])
-            step_size = second_momentum_buffer.clamp_min_(1e-10).rsqrt_()
+            step_size = second_momentum_buffer.clamp_min(1e-10).rsqrt_()
             v_chunk.mul_(step_size)
             v_norm_new = v_chunk.norm(dim=(-2, -1), keepdim=True)
-            v_chunk.mul_(v_norm / v_norm_new.clamp_min(1e-10))
+            v_chunk.mul_(v_norm / v_norm_new.clamp_min_(1e-10))
 
             v_chunk = v_chunk.view(grad_shape)
 
@@ -879,12 +879,8 @@ class MLP(nn.Module):
         # corrective factor to account for transpose
         self.c_fc.lr_mul = 2.
 
-        std = 0.5 * (dim ** -0.5)
-        bound = (3 ** 0.5) * std # improved init scale by @YouJiacheng
-
         with torch.no_grad():
             nn.init.orthogonal_(self.c_fc, gain=2 ** 0.5)
-            # self.c_fc.uniform_(-bound, bound)
 
             nn.init.zeros_(self.c_proj)  # zero init suggested by @Grad62304977
 
