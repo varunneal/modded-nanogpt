@@ -569,13 +569,13 @@ class Muon(torch.optim.Optimizer):
             )
 
             # Determine LR and WR
-            eff_lr = group["lr"] * group.set_default("eff_lr",
+            eff_lr = group["lr"] * group.setdefault("eff_lr",
                 max(1., param_shape[-2] / param_shape[-1]) ** 0.5
                 * torch.tensor(
                     [getattr(param, "lr_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
                 )
             )
-            eff_wd = group["wd"] * group.set_default("eff_wd",
+            eff_wd = group["wd"] * group.setdefault("eff_wd",
                 torch.tensor(
                     [getattr(param, "wd_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
                 )
