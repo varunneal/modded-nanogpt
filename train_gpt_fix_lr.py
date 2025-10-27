@@ -568,13 +568,18 @@ class Muon(torch.optim.Optimizer):
                 torch.zeros_like(updated_grads[..., :1, :])
             )
 
-            # Determine LR and WD once per group, assuming constant for params in group.
-            eff_lr = (
-                    group["lr"]
-                    * max(1., param_shape[-2] / param_shape[-1]) ** 0.5
-                    * getattr(params[module_idx], "lr_mul", 1.0)
+            # Determine LR and WR
+            eff_lr = group["lr"] * group.set_default("eff_lr",
+                max(1., param_shape[-2] / param_shape[-1]) ** 0.5
+                * torch.tensor(
+                    [getattr(params[idx], "lr_mul", 1.0) for idx in range(module_idx, module_idx + num_params)]
+                )
             )
-            eff_wd = group["weight_decay"] * getattr(params[module_idx], "wd_mul", 1.0)
+            eff_wd = group["wd"] * group.set_default("eff_wd",
+                torch.tensor(
+                    [getattr(params[idx], "wd_mul", 1.0) for idx in range(module_idx, module_idx + num_params)]
+                )
+            )
 
             # Compute zeropower for the entire chunk in a single, batched call.
             if num_params == 0:
@@ -587,20 +592,21 @@ class Muon(torch.optim.Optimizer):
 
             # NorMuon: second_momentum_buffer tracks squared magnitude of gradients along one dim (https://arxiv.org/pdf/2510.05491)
             v_norm = v_chunk.norm(dim=(-2, -1), keepdim=True)
-            v_mean = torch.mean(v_chunk.square(), dim=-1 if param_shape[-2] >= param_shape[-1] else -2, keepdim=True)
+            v_mean = v_chunk.square().mean(dim=-1 if param_shape[-2] >= param_shape[-1] else -2, keepdim=True)
             second_momentum_buffer.lerp_(v_mean.to(dtype=param_dtype), 1 - group["beta2"])
-
-            step_size = second_momentum_buffer.clamp_min(1e-10).rsqrt()
-            denom = (v_chunk * step_size).norm(dim=(-2, -1), keepdim=True).clamp_min(1e-10)
-            v_chunk.mul_(v_norm * step_size / denom)
+            step_size = second_momentum_buffer.clamp_min_(1e-10).rsqrt_()
+            v_chunk.mul_(step_size)
+            v_norm_new = v_chunk.norm(dim=(-2, -1), keepdim=True)
+            v_chunk.mul_(v_norm / v_norm_new.clamp_min(1e-10))
 
             v_chunk = v_chunk.view(grad_shape)
 
             updated_params = torch.empty_like(grad_chunk)
             param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
+            # Apply weight decay directly to the buffer.
+            param_chunk.mul_(1 - eff_wd)
 
-            # param <- param - lr * v
-            param_chunk.add_(v_chunk, alpha=-eff_lr)
+            param_chunk.add_(-eff_lr * v_chunk)
 
             updated_params[:num_params].copy_(param_chunk)
             if num_params < chunk_size:
@@ -1289,7 +1295,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.035, momentum=0.95, beta2=0.95, weight_decay=0.01)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.0)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
