@@ -575,7 +575,7 @@ class Muon(torch.optim.Optimizer):
                     [getattr(param, "lr_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
                 )
             )
-            eff_wd = group["wd"] * group.setdefault("eff_wd",
+            eff_wd = group["weight_decay"] * group.setdefault("eff_wd",
                 torch.tensor(
                     [getattr(param, "wd_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
                 )
