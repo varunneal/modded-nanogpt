@@ -606,7 +606,7 @@ class Muon(torch.optim.Optimizer):
 
             # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
             same_sign = torch.signbit(v_chunk) == torch.signbit(param_chunk)
-            v_chunk.add_(eff_wd * same_sign.where(param_chunk, 0))
+            v_chunk.add_(eff_wd * (param_chunk * same_sign.to(param_dtype)))
 
             # param <- param - lr * v
             param_chunk.add_(-eff_lr * v_chunk)
