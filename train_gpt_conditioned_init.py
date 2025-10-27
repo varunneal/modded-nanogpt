@@ -573,12 +573,12 @@ class Muon(torch.optim.Optimizer):
                 max(1., param_shape[-2] / param_shape[-1]) ** 0.5
                 * torch.tensor(
                     [getattr(param, "lr_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
-                )
+                ).view(-1, 1, 1)
             )
             eff_wd = group["weight_decay"] * group.setdefault("eff_wd",
                 torch.tensor(
                     [getattr(param, "wd_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
-                )
+                ).view(-1, 1, 1)
             )
 
             # Compute zeropower for the entire chunk in a single, batched call.
@@ -606,8 +606,7 @@ class Muon(torch.optim.Optimizer):
 
             # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
             same_sign = torch.signbit(v_chunk) == torch.signbit(param_chunk)
-            wd_term = torch.where(same_sign, param_chunk, param_chunk.new_zeros(()))
-            v_chunk.add_(eff_wd * wd_term)
+            v_chunk.add_(eff_wd * same_sign.where(param_chunk, 0))
 
             # param <- param - lr * v
             param_chunk.add_(-eff_lr * v_chunk)
