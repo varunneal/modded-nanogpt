@@ -562,6 +562,7 @@ class Muon(torch.optim.Optimizer):
                 updated_grads = updated_grads.view(4 * grad_shape[0], grad_shape[1], grad_shape[2] // 4)
             param_shape = grad_shape[1:]
             param_dtype = params[module_idx].dtype
+            param_device = params[module_idx].device
 
             second_momentum_buffer = group.setdefault("second_momentum_buffer",
                 torch.zeros_like(updated_grads[..., :, :1]) if param_shape[-2] >= param_shape[-1] else
@@ -573,12 +574,12 @@ class Muon(torch.optim.Optimizer):
                 max(1., param_shape[-2] / param_shape[-1]) ** 0.5
                 * torch.tensor(
                     [getattr(param, "lr_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
-                ).view(-1, 1, 1)
+                ).to(dtype=param_dtype, device=param_device).view(-1, 1, 1)
             )
             eff_wd = group["weight_decay"] * group.setdefault("eff_wd",
                 torch.tensor(
                     [getattr(param, "wd_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
-                ).view(-1, 1, 1)
+                ).to(dtype=param_dtype, device=param_device).view(-1, 1, 1)
             )
 
             # Compute zeropower for the entire chunk in a single, batched call.
