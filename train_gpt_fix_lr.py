@@ -755,8 +755,8 @@ class Yarn(nn.Module):
             theta.sin().to(torch.bfloat16), persistent=False
         )
         self.angular_freq = angular_freq
-        # start with 0.12 inspired by @leloykun and learnable scalars used by @brendanh0gan https://x.com/hi_tysam/status/1879693583898591283
-        self.attn_scale = 0.12
+        # start with 0.1, inspired by 0.12 from @leloykun and learnable scalars used by @brendanh0gan https://x.com/hi_tysam/status/1879693583898591283
+        self.attn_scale = 0.1
 
     def apply(self, old_window: int, new_window: int, alpha: int=1, beta: int=32):
         rotations = args.block_size * old_window * self.angular_freq / (2 * torch.pi)

@@ -761,7 +761,7 @@ class Yarn(nn.Module):
         )
         self.angular_freq = angular_freq
         # start with 0.12 inspired by @leloykun and learnable scalars used by @brendanh0gan https://x.com/hi_tysam/status/1879693583898591283
-        self.attn_scale = 0.12
+        self.attn_scale = 0.36
 
     def apply(self, old_window: int, new_window: int, alpha: int=1, beta: int=32):
         rotations = args.block_size * old_window * self.angular_freq / (2 * torch.pi)
@@ -1209,7 +1209,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 2265
+    num_iterations: int = 2260
     lr_schedule = (0.5, 0.98)    # breakpoints for 3-part schedule: (flat, linear decay, flat)
     lr_min = 0.1
     # evaluation and logging
@@ -1298,7 +1298,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.035, momentum=0.95, beta2=0.95, weight_decay=0.01)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.04, momentum=0.95, beta2=0.95, weight_decay=0.01)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
