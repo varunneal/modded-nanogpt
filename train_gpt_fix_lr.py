@@ -1200,7 +1200,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 2290
+    num_iterations: int = 2295
     lr_schedule = (0.5, 0.98)    # breakpoints for 3-part schedule: (flat, linear decay, flat)
     lr_min = 0.1
     # evaluation and logging
@@ -1289,7 +1289,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.04, momentum=0.95, beta2=0.95, weight_decay=0.01)
+optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.035, momentum=0.95, beta2=0.95, weight_decay=0.01)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
