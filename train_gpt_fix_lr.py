@@ -586,17 +586,13 @@ class Muon(torch.optim.Optimizer):
                 v_chunk = polar_express(updated_grads)
 
             # NorMuon: second_momentum_buffer tracks squared magnitude of gradients along one dim (https://arxiv.org/pdf/2510.05491)
-            v2 = v_chunk.square()
-            v_norm = v2.sum(dim=(-2, -1), keepdim=True).sqrt()
-
-            reduce_dim, other_dim = (-1, -2) if param_shape[-2] >= param_shape[-1] else (-2, -1)
-            v2_sum = v2.sum(dim=reduce_dim, keepdim=True)
-            v_mean = v2_sum / param_shape[reduce_dim]
+            v_norm = v_chunk.norm(dim=(-2, -1), keepdim=True)
+            v_mean = torch.mean(v_chunk.square(), dim=-1 if param_shape[-2] >= param_shape[-1] else -2, keepdim=True)
             second_momentum_buffer.lerp_(v_mean.to(dtype=param_dtype), 1 - group["beta2"])
 
             step_size = second_momentum_buffer.clamp_min(1e-10).rsqrt()
-            denom = (v2_sum * second_momentum_buffer).sum(dim=other_dim, keepdim=True).clamp_min(1e-10).rsqrt()
-            v_chunk.mul_(v_norm * step_size * denom)
+            denom = (v_chunk * step_size).norm(dim=(-2, -1), keepdim=True).clamp_min(1e-10)
+            v_chunk.mul_(v_norm * step_size / denom)
 
             v_chunk = v_chunk.view(grad_shape)
 
@@ -1204,7 +1200,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 2280
+    num_iterations: int = 2290
     lr_schedule = (0.5, 0.98)    # breakpoints for 3-part schedule: (flat, linear decay, flat)
     lr_min = 0.1
     # evaluation and logging
