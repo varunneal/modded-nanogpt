@@ -560,9 +560,8 @@ class Muon(torch.optim.Optimizer):
                 for p in params[module_idx:module_idx + num_params]:
                     assert p.label == 'attn'
                 updated_grads = updated_grads.view(4 * grad_shape[0], grad_shape[1], grad_shape[2] // 4)
-            param_shape = grad_shape[1:]
-            param_dtype = params[module_idx].dtype
-            param_device = params[module_idx].device
+            ref_param = params[module_idx]
+            param_shape = ref_param.shape
 
             second_momentum_buffer = group.setdefault("second_momentum_buffer",
                 torch.zeros_like(updated_grads[..., :, :1]) if param_shape[-2] >= param_shape[-1] else
@@ -572,14 +571,14 @@ class Muon(torch.optim.Optimizer):
             # Determine LR and WR
             eff_lr = group["lr"] * group.setdefault("eff_lr",
                 max(1., param_shape[-2] / param_shape[-1]) ** 0.5
-                * torch.tensor(
+                * ref_param.new_tensor(
                     [getattr(param, "lr_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
-                ).to(dtype=param_dtype, device=param_device).view(-1, 1, 1)
+                ).view(-1, 1, 1)
             )
             eff_wd = group["weight_decay"] * group.setdefault("eff_wd",
-                torch.tensor(
+                ref_param.new_tensor(
                     [getattr(param, "wd_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
-                ).to(dtype=param_dtype, device=param_device).view(-1, 1, 1)
+                ).view(-1, 1, 1)
             )
 
             # Compute zeropower for the entire chunk in a single, batched call.
@@ -594,7 +593,7 @@ class Muon(torch.optim.Optimizer):
             # NorMuon: second_momentum_buffer tracks squared magnitude of gradients along one dim (https://arxiv.org/pdf/2510.05491)
             v_norm = v_chunk.norm(dim=(-2, -1), keepdim=True)
             v_mean = v_chunk.square().mean(dim=-1 if param_shape[-2] >= param_shape[-1] else -2, keepdim=True)
-            second_momentum_buffer.lerp_(v_mean.to(dtype=param_dtype), 1 - group["beta2"])
+            second_momentum_buffer.lerp_(v_mean.to(dtype=ref_param.dtype), 1 - group["beta2"])
             step_size = second_momentum_buffer.clamp_min_(1e-10).rsqrt_()
             v_chunk.mul_(step_size)
             v_norm_new = v_chunk.norm(dim=(-2, -1), keepdim=True)
@@ -607,7 +606,7 @@ class Muon(torch.optim.Optimizer):
 
             # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
             same_sign = torch.signbit(v_chunk) == torch.signbit(param_chunk)
-            v_chunk.add_(eff_wd * (param_chunk * same_sign.to(param_dtype)))
+            v_chunk.add_(eff_wd * (param_chunk * same_sign.to(ref_param.dtype)))
 
             # param <- param - lr * v
             param_chunk.add_(-eff_lr * v_chunk)
@@ -1214,7 +1213,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_iterations: int = 2255
+    num_iterations: int = 2240
     lr_schedule = (0.5, 0.98)    # breakpoints for 3-part schedule: (flat, linear decay, flat)
     lr_min = 0.1
     # evaluation and logging
