@@ -765,7 +765,7 @@ class Yarn(nn.Module):
         )
         self.angular_freq = angular_freq
         # start with 0.12 inspired by @leloykun and learnable scalars used by @brendanh0gan https://x.com/hi_tysam/status/1879693583898591283
-        self.attn_scale = 0.12
+        self.attn_scale = 0.1#2
 
     def apply(self, old_window: int, new_window: int, alpha: int=1, beta: int=32):
         rotations = args.block_size * old_window * self.angular_freq / (2 * torch.pi)
@@ -820,9 +820,11 @@ class CausalSelfAttention(nn.Module):
         with torch.no_grad():
             qkvo = self.qkvo_w.view(4, self.num_heads, self.head_dim, self.dim)
             # Conditioned Initialization reduces spread of singular values - https://openreview.net/pdf?id=cKNOCYPo2W
+            gain = 2. ** 0.5
+
             for head_idx in range(self.num_heads):
-                nn.init.orthogonal_(qkvo[0, head_idx])
-                nn.init.orthogonal_(qkvo[1, head_idx])
+                nn.init.orthogonal_(qkvo[0, head_idx], gain=gain)
+                nn.init.orthogonal_(qkvo[1, head_idx], gain=gain)
 
                 qkvo[2, head_idx].zero_()
                 nn.init.eye_(qkvo[2, head_idx].narrow(-1, head_idx * self.head_dim, self.head_dim))
@@ -881,8 +883,8 @@ class MLP(nn.Module):
         bound = (3 ** 0.5) * std # improved init scale by @YouJiacheng
 
         with torch.no_grad():
-            # nn.init.orthogonal_(self.c_fc, gain=2 ** 0.5)
-            self.c_fc.uniform_(-bound, bound)
+            nn.init.orthogonal_(self.c_fc, gain=2 ** 0.5)
+            # self.c_fc.uniform_(-bound, bound)
 
             nn.init.zeros_(self.c_proj)  # zero init suggested by @Grad62304977
 
@@ -1253,7 +1255,7 @@ logfile = None
 if master_process:
     run_id = args.run_id
     os.makedirs("logs", exist_ok=True)
-    logfile = f"logs/uniform_lr03_{run_id}.txt"
+    logfile = f"logs/ortho_gain_lr03_{run_id}.txt"
     print(logfile)
 def print0(s, console=False):
     if master_process:
