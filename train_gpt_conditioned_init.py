@@ -14,7 +14,6 @@ from collections import defaultdict
 from itertools import accumulate
 from pathlib import Path
 
-os.environ["OMP_NUM_THREADS"] = "8"
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 
@@ -568,18 +567,22 @@ class Muon(torch.optim.Optimizer):
                 torch.zeros_like(updated_grads[..., :1, :])
             )
 
-            # Determine LR and WR
-            eff_lr = group["lr"] * group.setdefault("eff_lr",
-                max(1., param_shape[-2] / param_shape[-1]) ** 0.5
-                * ref_param.new_tensor(
-                    [getattr(param, "lr_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
-                ).view(-1, 1, 1)
-            )
-            eff_wd = group["weight_decay"] * group.setdefault("eff_wd",
-                ref_param.new_tensor(
+            # one-time initialization
+            if "param_lr" not in group:
+                group["param_lr"] = (
+                    max(1., param_shape[-2] / param_shape[-1]) ** 0.5
+                    * ref_param.new_tensor(
+                        [getattr(param, "lr_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
+                    ).view(-1, 1, 1)
+                )
+
+                group["param_wd"] = ref_param.new_tensor(
                     [getattr(param, "wd_mul", 1.0) for param in params[module_idx:module_idx + num_params]]
                 ).view(-1, 1, 1)
-            )
+
+            # Determine LR and WR
+            eff_lr = group["lr"] * group["param_lr"]
+            eff_wd = group["weight_decay"] * group["param_wd"]
 
             # Compute zeropower for the entire chunk in a single, batched call.
             if num_params == 0:
@@ -865,7 +868,7 @@ class CausalSelfAttention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, dim: int, layer_idx):
+    def __init__(self, dim: int):
         super().__init__()
         hdim = 4 * dim
         # make matrices the same shape to enable batched call in optimizer
@@ -884,7 +887,7 @@ class MLP(nn.Module):
 
     def forward(self, x: Tensor):
         x = F.linear(x, self.c_fc.T.type_as(x))
-        x = F.relu(x).square() # https://arxiv.org/abs/210x9.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
+        x = F.relu(x).square() # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
         x = F.linear(x, self.c_proj.type_as(x))
         return x
 
@@ -894,7 +897,7 @@ class Block(nn.Module):
         # skip attention of blocks.7 (the 8th layer) by @YouJiacheng
         self.attn = CausalSelfAttention(dim, head_dim, num_heads) if layer_idx not in [0, 7] else None
         # skip MLP blocks for first MLP layer by @EmelyanenkoK
-        self.mlp = MLP(dim, layer_idx) if layer_idx != 0 else None
+        self.mlp = MLP(dim) if layer_idx != 0 else None
 
     def forward(self, x: Tensor, x0: Tensor, lambdas: Tensor, attn_args: AttnArgs):
         x = lambdas[0] * x + lambdas[1] * x0
@@ -1202,8 +1205,6 @@ def distributed_data_generator(filename_pattern: str, num_tokens: int, max_seq_l
 # -----------------------------------------------------------------------------
 # int main
 
-NUM_STEPS = int(os.environ.get("NUM_STEPS", "2290"))
-
 @dataclass
 class Hyperparameters:
     # data
@@ -1219,7 +1220,7 @@ class Hyperparameters:
     lr_min = 0.1
     # evaluation and logging
     run_id: str = f"{uuid.uuid4()}"
-    val_loss_every: int = 125  # every how many steps to evaluate val loss? 0 for only at the end
+    val_loss_every: int = 250  # every how many steps to evaluate val loss? 0 for only at the end
     save_checkpoint: bool = False
     # attention masking
     block_size: int = 128
