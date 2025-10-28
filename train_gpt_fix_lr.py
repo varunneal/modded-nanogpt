@@ -548,7 +548,9 @@ class Muon(torch.optim.Optimizer):
 
             num_params = min(chunk_size, max(0, len(params) - start_idx))  # num params for this rank
 
-            momentum_buffer = group.setdefault("momentum_buffer", torch.zeros_like(grad_chunk[:num_params]))
+            if "momentum_buffer" not in group:
+                group["momentum_buffer"]  = torch.zeros_like(grad_chunk[:num_params])
+            momentum_buffer = group["momentum_buffer"]
             # Apply momentum update to the persistent momentum buffer in-place
             momentum_buffer.lerp_(grad_chunk[:num_params], 1 - group["momentum"])
             updated_grads = grad_chunk[:num_params].lerp_(momentum_buffer, group["momentum"])
@@ -562,12 +564,12 @@ class Muon(torch.optim.Optimizer):
             ref_param = params[module_idx]
             param_shape = ref_param.shape
 
-            second_momentum_buffer = group.setdefault("second_momentum_buffer",
-                torch.zeros_like(updated_grads[..., :, :1]) if param_shape[-2] >= param_shape[-1] else
-                torch.zeros_like(updated_grads[..., :1, :])
-            )
+            if "second_momentum_buffer" not in group:
+                group["second_momentum_buffer"] = (torch.zeros_like(updated_grads[..., :, :1])
+                    if param_shape[-2] >= param_shape[-1] else torch.zeros_like(updated_grads[..., :1, :])
+                )
+            second_momentum_buffer = group["second_momentum_buffer"]
 
-            # one-time initialization
             if "param_lr" not in group:
                 group["param_lr"] = (
                     max(1., param_shape[-2] / param_shape[-1]) ** 0.5
