@@ -405,10 +405,11 @@ def polar_express(G: torch.Tensor):
         X = X.mT
     return X
 
-# -----------------------------------------------------------------------------
-# Muon optimizer
 
-class Muon(torch.optim.Optimizer):
+# -----------------------------------------------------------------------------
+# NorMuon optimizer
+
+class NorMuon(torch.optim.Optimizer):
     """
     Muon - MomentUm Orthogonalized by Newton-schulz
 
@@ -417,7 +418,7 @@ class Muon(torch.optim.Optimizer):
     Muon internally runs standard SGD-momentum, and then performs an orthogonalization post-
     processing step, in which each 2D parameter's update is replaced with the nearest orthogonal
     matrix. To efficiently orthogonalize each update, we use a Newton-Schulz iteration, which has
-    the advantage that it can be stably run in bfloat16 on the GPU. 
+    the advantage that it can be stably run in bfloat16 on the GPU.
     Note: A later PR replaced Newton-Shulz with Polar Express for the orthogonalization step
 
     Warning: This optimizer should not be used for the embedding layer, the final fully connected layer,
@@ -427,10 +428,10 @@ class Muon(torch.optim.Optimizer):
         This hyper-optimized class has faster execution time than the current impl of Adam for small params
 
     Custom distributed sizing:
-    The model stores all attn and mlp weights in the same shape, and then updates the view as 
-    needed on the forward pass. This enables attn and mlp weights to be contained within the same 
-    dist.reduce_scatter_tensor() call. The model architecture has been customized to enable 
-    (n_attn_layers+n_mlp_layers*2)%8==0 for batching across 8 GPUs with zero padding on mlp and attn. 
+    The model stores all attn and mlp weights in the same shape, and then updates the view as
+    needed on the forward pass. This enables attn and mlp weights to be contained within the same
+    dist.reduce_scatter_tensor() call. The model architecture has been customized to enable
+    (n_attn_layers+n_mlp_layers*2)%8==0 for batching across 8 GPUs with zero padding on mlp and attn.
     The scheduling is:
         1. reduce scatter smear_gate (1 param 7 padding params)
         2. reduce scatter attn_gate (10 params 6 padding params)
@@ -445,8 +446,8 @@ class Muon(torch.optim.Optimizer):
         9. wait for each all gather to complete and update params
     Empirically, leading with small params provides an additional 0.2s improvement.
     """
-    def __init__(self, params, lr=0.02, weight_decay=0.01, momentum=0.95, custom_sizing=True):
-        defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum)
+    def __init__(self, params, lr=0.02, weight_decay=0.01, momentum=0.95, custom_sizing=True, beta2=0.95):
+        defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, beta2=beta2)
         # custom sizing requires 8 GPUs
         if custom_sizing and dist.get_world_size()==8:
             param_groups = self.generate_custom_param_groups(params)
@@ -470,10 +471,10 @@ class Muon(torch.optim.Optimizer):
             group_params = [p for p in non_attn_subset if p.shape == size]
             param_groups.append(dict(params=group_params))
         return param_groups
-    
+
     def generate_custom_param_groups(self, params):
         """
-        Implementation requires that a single GPU does not receive both attn 
+        Implementation requires that a single GPU does not receive both attn
         and mlp params when a param group is split across GPUs.
         """
         label_ranks = {
@@ -591,6 +592,8 @@ class Muon(torch.optim.Optimizer):
                     update_grads_for_zeropower.append(
                         torch.zeros_like(p_example.grad)
                     )
+                    if i==0:
+                        second_momentum_buffer = torch.zeros((chunk_size, *p_example.shape[:-1], 1), dtype=torch.float32, device=p_example.device) if p_example.size(-2) >= p_example.size(-1) else torch.zeros((chunk_size, *p_example.shape[:-3], 1, p_example.shape[-1]), device=p_example.device, dtype=torch.float32)
                     continue
                 param = params[param_idx]
                 grad = grad_chunk[
@@ -601,8 +604,12 @@ class Muon(torch.optim.Optimizer):
                 # Initialize momentum buffer if not present
                 if not state:
                     state["momentum_buffer"] = torch.zeros_like(grad)
+                    if i==0:
+                        state["second_momentum_buffer"] = torch.zeros((chunk_size, *grad.shape[:-1], 1), dtype=torch.float32, device=grad.device) if param.size(-2) >= param.size(-1) else torch.zeros((chunk_size, *grad.shape[:-3], 1, grad.shape[-1]), dtype=torch.float32, device=grad.device)
 
                 momentum_buffer = state["momentum_buffer"]
+                if i==0:
+                    second_momentum_buffer = state["second_momentum_buffer"]
 
                 # Apply momentum update directly to the persistent momentum buffer in-place.
                 momentum_buffer.lerp_(grad, 1 - group["momentum"])
@@ -628,13 +635,24 @@ class Muon(torch.optim.Optimizer):
                 for p in params[param_idx:param_idx+chunk_size]:
                     assert getattr(params[param_idx], 'label', None)=='attn', "GPU cannot mix attn and mlp params"
                 batch = 4 * original_shape[0]
-                d1 = original_shape[1] 
+                d1 = original_shape[1]
                 d2 = original_shape[2] // 4
                 batched = batched_update_grads.view(batch, d1, d2)
                 v_chunk = polar_express(batched)
                 v_chunk = v_chunk.view(original_shape)
             else:
                 v_chunk = polar_express(batched_update_grads)
+
+
+            vnorm = v_chunk.norm(dim=(-2,-1), keepdim=True)
+            v_mean = torch.mean(v_chunk * v_chunk, dim=-1, keepdim=True) if v_chunk.size(-2) >= v_chunk.size(-1) else torch.mean(v_chunk * v_chunk, dim=-2, keepdim=True)
+            second_momentum_buffer.lerp_(v_mean.float(), 1 - group["beta2"])
+            step_size = 1 / second_momentum_buffer.sqrt().clamp_min(1e-10)
+            v_chunk.mul_(step_size)
+            vnorm_new = v_chunk.norm(dim=(-2,-1), keepdim=True)
+            v_chunk.mul_(vnorm / (vnorm_new.clamp_min(1e-10)))
+
+
 
             # Add the computed zeropower update to the parameters in the buffer.
             # This loop applies the zeropower output (v_chunk) to the `updated_param_chunk` buffer.
@@ -790,7 +808,7 @@ class Yarn(nn.Module):
         self.head_dim = head_dim
         self.max_seq_len = max_seq_len
         self.reset()
-        
+
     def reset(self):
         angular_freq = (1 / 1024) ** torch.linspace(0, 1, steps=self.head_dim//4, dtype=torch.float32, device=device)
         # half-truncate RoPE by @YouJiacheng (w/ base freq tuning)
@@ -1094,12 +1112,12 @@ class BOSFinder:
     def _load(self):
         self.bos_idx_async = (self.tokens == BOS_ID).nonzero(as_tuple=True)[0].to(torch.int64).cpu().numpy()
         self.ready.set()
-    
+
     def start(self):
         self.ready.clear()
         self.thread = threading.Thread(target=self._load)
         self.thread.start()
-    
+
     def get(self):
         if self.thread:
             self.ready.wait()
@@ -1142,17 +1160,17 @@ class DataPreloader:
         self.thread = None
         self.data = None
         self.ready = threading.Event()
-    
+
     def _load(self):
         tokens = _load_data_shard(next(self.file_iter))
         self.data = (tokens, BOSFinder(tokens, self.world_size))
         self.ready.set()
-    
+
     def start(self):
         self.ready.clear()
         self.thread = threading.Thread(target=self._load)
         self.thread.start()
-    
+
     def get(self):
         if self.thread:
             self.ready.wait()
@@ -1244,7 +1262,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_scheduled_iterations: int = 2290  # number of steps to complete lr and ws schedule
+    num_scheduled_iterations: int = 2275  # number of steps to complete lr and ws schedule
     num_extension_iterations: int = 40  # number of steps to continue training at final lr and ws
     num_iterations: int = num_scheduled_iterations + num_extension_iterations
     cooldown_frac: int = 0.45  # fraction of num_scheduled_iterations spent cooling down the learning rate
@@ -1335,7 +1353,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = Muon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, weight_decay=0.0)
+optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.06, momentum=0.95, weight_decay=0.0, beta2=0.95)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
@@ -1415,7 +1433,7 @@ for step in range(warmup_steps):
         model.yarn.reset()
         ws_long = args.ws_schedule[0]
     else:
-        new_ws_long = args.ws_schedule[ws_idx]  
+        new_ws_long = args.ws_schedule[ws_idx]
         if new_ws_long > ws_long:
             model.yarn.apply(ws_long, new_ws_long)
             ws_long = new_ws_long
@@ -1486,7 +1504,7 @@ for step in range(train_steps + 1):
         inputs, targets, cum_seqlens = next(train_loader)
         model(inputs, targets, cum_seqlens, ws_short, ws_long).backward()
     step_optimizers(step, optimizers, model)
-     
+
     # logging
     approx_training_time_ms = training_time_ms + 1000 * (time.perf_counter() - t0)
     print0(f"step:{step+1}/{train_steps} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
