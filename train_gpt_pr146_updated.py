@@ -1208,8 +1208,8 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_scheduled_iterations: int = 2240  # number of steps to complete lr and ws schedule
-    num_extension_iterations: int = 45  # number of steps to continue training at final lr and ws
+    num_scheduled_iterations: int = 2245  # number of steps to complete lr and ws schedule
+    num_extension_iterations: int = 40  # number of steps to continue training at final lr and ws
     num_iterations: int = num_scheduled_iterations + num_extension_iterations
     cooldown_frac: float = 0.50  # fraction of num_scheduled_iterations spent cooling down the learning rate
     # evaluation and logging
@@ -1320,7 +1320,9 @@ def get_ws(step: int):
     # on final step return specific ws for validation
     if step == args.num_iterations:
         return args.ws_validate_post_yarn_ext // 2, args.ws_validate_post_yarn_ext
-    x = min(step / (1 + args.num_scheduled_iterations), 0.9999)
+    elif step >= args.num_extension_iterations:
+        return args.ws_validate // 2, args.ws_validate
+    x = step / args.num_scheduled_iterations
     assert 0 <= x < 1
     ws_idx = int(len(args.ws_schedule) * x)
     return args.ws_schedule[ws_idx] // 2, args.ws_schedule[ws_idx]
@@ -1414,8 +1416,6 @@ for step in range(train_steps + 1):
 
     # --------------- VALIDATION SECTION -----------------
     if last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0):
-        if last_step:
-            ws_long = args.ws_validate_post_yarn_ext
         # stop the clock
         torch.cuda.synchronize()
         training_time_ms += 1000 * (time.perf_counter() - t0)
