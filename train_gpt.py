@@ -1361,7 +1361,7 @@ for opt in optimizers:
 
 # learning rate schedule: stable then linear decay
 def get_lr(step: int):
-    x = min(0.9999, step / args.num_iterations)
+    x = min(0.9999, step / args.num_scheduled_iterations)
     assert 0 <= x < 1
     lr = 1.0
     if x >= 1 - args.cooldown_frac:
@@ -1373,7 +1373,7 @@ def get_ws(step: int):
     # set short window size to half of long window size
     # on final step return specific ws for validation
     if step == args.num_iterations:
-        return args.ws_validate // 2, args.ws_validate
+        return args.ws_validate_post_yarn_ext // 2, args.ws_validate_post_yarn_ext
     x = min(step / (1 + args.num_scheduled_iterations), 0.9999)
     assert 0 <= x < 1
     ws_idx = int(len(args.ws_schedule) * x)
@@ -1468,8 +1468,6 @@ for step in range(train_steps + 1):
 
     # --------------- VALIDATION SECTION -----------------
     if last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0):
-        if last_step:
-            ws_long = args.ws_validate_post_yarn_ext
         # stop the clock
         torch.cuda.synchronize()
         training_time_ms += 1000 * (time.perf_counter() - t0)

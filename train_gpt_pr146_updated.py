@@ -1302,22 +1302,24 @@ for opt in optimizers:
     for group in opt.param_groups:
         group["initial_lr"] = group["lr"]
 
-# learning rate schedule: flat, linear decay, then flat
+# learning rate schedule: flat, then linear decay, then flat
 def get_lr(step: int):
-    n = args.num_extension_iterations
-    x = min(step, n - 1) / n
-    if x < 1 - args.cooldown_frac:
-        return 1.0
-    w = (1 - x) / args.cooldown_frac
-    return  w * 1.0 + (1 - w) * 0.1
+    x = min(0.9999, step / args.num_scheduled_iterations)
+    assert 0 <= x < 1
+    lr = 1.0
+    if x >= 1 - args.cooldown_frac:
+        w = (1 - x) / args.cooldown_frac
+        lr = w * 1.0 + (1 - w) * 0.1
+    return lr
 
 def get_ws(step: int):
     # set short window size to half of long window size
     # on final step return specific ws for validation
     if step == args.num_iterations:
-        return args.ws_validate // 2, args.ws_validate
-    n = len(args.ws_schedule)
-    ws_idx = min(step * n // (args.num_extension_iterations + 1), n - 1)
+        return args.ws_validate_post_yarn_ext // 2, args.ws_validate_post_yarn_ext
+    x = min(step / (1 + args.num_scheduled_iterations), 0.9999)
+    assert 0 <= x < 1
+    ws_idx = int(len(args.ws_schedule) * x)
     return args.ws_schedule[ws_idx] // 2, args.ws_schedule[ws_idx]
 
 def get_muon_momentum(step: int, muon_warmup_steps=300, muon_cooldown_steps=50, momentum_min=0.85, momentum_max=0.95):
