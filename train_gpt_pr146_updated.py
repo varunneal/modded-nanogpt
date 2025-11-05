@@ -588,6 +588,9 @@ class NorMuon(torch.optim.Optimizer):
             # Compute zeropower for the entire chunk in a single, batched call.
             if num_params == 0:
                 v_chunk = updated_grads
+            elif params[module_idx].label == "smear_gate":
+                # dividing by magnitude is equivalent of SVN for 1d tensors
+                v_chunk = updated_grads / (updated_grads.norm(dim=(-2, -1), keepdim=True).clamp_min(1e-10))
             else:
                 v_chunk = polar_express(updated_grads)
 
