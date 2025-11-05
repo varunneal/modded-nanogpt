@@ -1219,7 +1219,7 @@ class Hyperparameters:
     # attention masking
     block_size: int = 128
     ws_schedule: tuple = (3, 7, 11)
-    ws_validate: int = 13 # increase final validation ws, used for YaRN extension and short window size @classiclarryd
+    ws_final: int = 13 # increase final validation ws, used for YaRN extension and short window size @classiclarryd
     ws_validate_post_yarn_ext: int = 20 # extend long windows out even further after applying YaRN
 
 args = Hyperparameters()
@@ -1321,7 +1321,7 @@ def get_ws(step: int):
     if step == args.num_iterations:
         return args.ws_validate_post_yarn_ext // 2, args.ws_validate_post_yarn_ext
     elif step >= args.num_scheduled_iterations:
-        return args.ws_validate // 2, args.ws_validate
+        return args.ws_final // 2, args.ws_final
     x = step / args.num_scheduled_iterations
     assert 0 <= x < 1
     ws_idx = int(len(args.ws_schedule) * x)
@@ -1373,15 +1373,16 @@ warmup_steps = 30
 initial_state = dict(model=copy.deepcopy(model.state_dict()),
                      optimizers=[copy.deepcopy(opt.state_dict()) for opt in optimizers]) # save the initial state
 train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len, grad_accum_steps=grad_accum_steps)
+ws_schedule = list(args.ws_schedule) + [args.ws_final]
 for step in range(warmup_steps):
     inputs, targets, cum_seqlens = next(train_loader)
     # each window size is a new graph, need to warm up each with Yarn.attn_scale
-    ws_idx = step % len(args.ws_schedule)
+    ws_idx = step % len(ws_schedule)
     if ws_idx==0:
         model.yarn.reset()
-        ws_long = args.ws_schedule[0]
+        ws_long = ws_schedule[0]
     else:
-        new_ws_long = args.ws_schedule[ws_idx]
+        new_ws_long = ws_schedule[ws_idx]
         if new_ws_long > ws_long:
             model.yarn.apply(ws_long, new_ws_long)
             ws_long = new_ws_long
