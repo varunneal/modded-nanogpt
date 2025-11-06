@@ -1316,7 +1316,7 @@ def get_ws(step: int):
     # set short window size to half of long window size
     # on final step return specific ws for validation
     if step == args.num_iterations:
-        return args.ws_validate_post_yarn_ext // 2, args.ws_validate_post_yarn_ext
+        return args.ws_schedule[-1] // 2, args.ws_validate_post_yarn_ext
     elif step >= args.num_scheduled_iterations:
         return args.ws_final // 2, args.ws_final
     x = step / args.num_scheduled_iterations
