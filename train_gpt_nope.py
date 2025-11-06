@@ -964,7 +964,7 @@ class GPT(nn.Module):
         short_bm = ws_short * args.block_size
         long_bm = ws_long * args.block_size
         bm_sizes = [None, short_bm, short_bm, short_bm, long_bm, short_bm, short_bm, None, short_bm, short_bm, short_bm, long_bm]
-        do_rope = [None, True, True, True, False, True, True, None, True, True, True, False]
+        do_rope = [None, True, True, True, False, True, True, None, True, True, True, True]
         assert len(bm_sizes) == len(self.blocks)
         assert len(bm_sizes) == len(do_rope)
 
