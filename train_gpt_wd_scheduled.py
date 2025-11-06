@@ -1305,13 +1305,14 @@ for opt in optimizers:
         group["initial_lr"] = group["lr"]
 
 # learning rate schedule: flat, then linear decay, then flat
-def get_lr(step: int):
-    x = min(0.9999, step / args.num_scheduled_iterations)
-    assert 0 <= x < 1
+def get_lr(step: int, lr_min=0.1):
+    if step >= args.num_scheduled_iterations:
+        return lr_min
+    x = step / args.num_scheduled_iterations
     lr = 1.0
     if x >= 1 - args.cooldown_frac:
         w = (1 - x) / args.cooldown_frac
-        lr = w * 1.0 + (1 - w) * 0.1
+        lr = w * 1.0 + (1 - w) * lr_min
     return lr
 
 def get_ws(step: int):
@@ -1320,7 +1321,6 @@ def get_ws(step: int):
     if step >= args.num_scheduled_iterations:
         return args.ws_final // 2, args.ws_final
     x = step / args.num_scheduled_iterations
-    assert 0 <= x < 1
     ws_idx = int(len(args.ws_schedule) * x)
     return args.ws_schedule[ws_idx] // 2, args.ws_schedule[ws_idx]
 
