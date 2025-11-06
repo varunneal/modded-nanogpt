@@ -1314,10 +1314,8 @@ def get_lr(step: int):
 
 def get_ws(step: int):
     # set short window size to half of long window size
-    # on final step return specific ws for validation
-    if step == args.num_iterations:
-        return args.ws_schedule[-1] // 2, args.ws_validate_post_yarn_ext
-    elif step >= args.num_scheduled_iterations:
+    # Higher ws on "extension" steps
+    if step >= args.num_scheduled_iterations:
         return args.ws_final // 2, args.ws_final
     x = step / args.num_scheduled_iterations
     assert 0 <= x < 1
@@ -1415,6 +1413,8 @@ for step in range(train_steps + 1):
 
     # --------------- VALIDATION SECTION -----------------
     if last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0):
+        if last_step:
+            ws_long = args.ws_validate_post_yarn_ext
         # stop the clock
         torch.cuda.synchronize()
         training_time_ms += 1000 * (time.perf_counter() - t0)
