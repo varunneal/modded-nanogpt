@@ -1303,6 +1303,7 @@ optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
         group["initial_lr"] = group["lr"]
+        group["initial_weight_decay"] = group["weight_decay"]
 
 # learning rate schedule: flat, then linear decay, then flat
 def get_lr(step: int):
@@ -1343,6 +1344,8 @@ def step_optimizers(step: int, optimizers, model):
     for optimizer in optimizers:
         for group in optimizer.param_groups:
             group["lr"] = group["initial_lr"] * get_lr(step)
+            # weight decay on same schedule as learning rate
+            group["weight_decay"] = group["initial_weight_decay"] * get_lr(step)
 
     # set muon momentum based on step
     momentum = get_muon_momentum(step)
