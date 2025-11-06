@@ -882,8 +882,8 @@ class MLP(nn.Module):
     def forward(self, x: Tensor):
         return quack_mlp_func(
             x,
-            self.c_fc.T.weight,
-            self.c_proj.weight,
+            self.c_fc.T,
+            self.c_proj,
             activation="relu_sq" # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
         )
 
