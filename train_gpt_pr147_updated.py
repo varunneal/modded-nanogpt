@@ -604,8 +604,10 @@ class NorMuon(torch.optim.Optimizer):
 
             updated_params = torch.empty_like(grad_chunk)
             param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
-            # Apply weight decay directly to the buffer.
-            param_chunk.mul_(1 - eff_wd)
+
+            # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
+            same_sign = torch.signbit(v_chunk) == torch.signbit(param_chunk)
+            v_chunk.add_(eff_wd * (param_chunk * same_sign.to(ref_param.dtype)))
 
             param_chunk.add_(-eff_lr * v_chunk)
 
@@ -1205,7 +1207,7 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_scheduled_iterations: int = 2245  # number of steps to complete lr and ws schedule
+    num_scheduled_iterations: int = 2225  # number of steps to complete lr and ws schedule
     num_extension_iterations: int = 40  # number of steps to continue training at final lr and ws
     num_iterations: int = num_scheduled_iterations + num_extension_iterations
     cooldown_frac: float = 0.50  # fraction of num_scheduled_iterations spent cooling down the learning rate
@@ -1296,7 +1298,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.0)
+optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.01)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
