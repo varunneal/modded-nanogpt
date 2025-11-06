@@ -3,3 +3,4 @@ tqdm
 torch
 huggingface-hub
 kernels
+quack-kernels @ git+https://github.com/Dao-AILab/quack.git@3e0fa64595
