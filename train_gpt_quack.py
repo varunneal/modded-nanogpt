@@ -860,12 +860,10 @@ class CausalSelfAttention(nn.Module):
         return y
 
 
-
-
-class MLP(QuackMLP):
+class MLP(nn.Module):
     def __init__(self, dim: int):
+        super().__init__()
         hdim = 4 * dim
-        self.actio
         # make matrices the same shape to enable batched call in optimizer
         self.c_fc = nn.Parameter(torch.empty(dim, hdim))
         self.c_proj = nn.Parameter(torch.empty(dim, hdim))
