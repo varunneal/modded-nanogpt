@@ -583,7 +583,7 @@ class NorMuon(torch.optim.Optimizer):
 
             # Determine LR and WR
             eff_lr = group["lr"] * group["param_lr"]
-            eff_wd = group["weight_decay"] * group["param_wd"]
+            eff_wd = group["lr"] * group["weight_decay"] * group["param_wd"]
 
             # Compute zeropower for the entire chunk in a single, batched call.
             if num_params == 0:
@@ -1298,12 +1298,11 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.01)
+optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.5)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
         group["initial_lr"] = group["lr"]
-        group["initial_weight_decay"] = group["weight_decay"]
 
 # learning rate schedule: flat, then linear decay, then flat
 def get_lr(step: int):
@@ -1344,8 +1343,6 @@ def step_optimizers(step: int, optimizers, model):
     for optimizer in optimizers:
         for group in optimizer.param_groups:
             group["lr"] = group["initial_lr"] * get_lr(step)
-            # weight decay on same schedule as learning rate
-            group["weight_decay"] = group["initial_weight_decay"] * get_lr(step)
 
     # set muon momentum based on step
     momentum = get_muon_momentum(step)
@@ -1452,7 +1449,7 @@ for step in range(train_steps + 1):
     # --------------- TRAINING SECTION -----------------
     for _ in range(grad_accum_steps):
         inputs, targets, cum_seqlens = next(train_loader)
-        model(inputs, targets, cum_seqlens, ws_short, ws_long).backward()
+        (model(inputs, targets, cum_seqlens, ws_short, ws_long) / grad_accum_steps).backward()
     step_optimizers(step, optimizers, model)
 
     # logging
