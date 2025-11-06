@@ -588,9 +588,6 @@ class NorMuon(torch.optim.Optimizer):
             # Compute zeropower for the entire chunk in a single, batched call.
             if num_params == 0:
                 v_chunk = updated_grads
-            elif params[module_idx].label == "smear_gate":
-                # dividing by magnitude is equivalent of SVN for 1d tensors
-                v_chunk = updated_grads / (updated_grads.norm(dim=(-2, -1), keepdim=True).clamp_min(1e-10))
             else:
                 v_chunk = polar_express(updated_grads)
 
@@ -1208,8 +1205,8 @@ class Hyperparameters:
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
     # optimization
-    num_scheduled_iterations: int = 2245  # number of steps to complete lr and ws schedule
-    num_extension_iterations: int = 40  # number of steps to continue training at final lr and ws
+    num_scheduled_iterations: int = 2235  # number of steps to complete lr and ws schedule
+    num_extension_iterations: int = 50  # number of steps to continue training at final lr and ws
     num_iterations: int = num_scheduled_iterations + num_extension_iterations
     cooldown_frac: float = 0.50  # fraction of num_scheduled_iterations spent cooling down the learning rate
     # evaluation and logging
@@ -1374,6 +1371,7 @@ initial_state = dict(model=copy.deepcopy(model.state_dict()),
                      optimizers=[copy.deepcopy(opt.state_dict()) for opt in optimizers]) # save the initial state
 train_loader = distributed_data_generator(args.train_files, args.train_batch_size, args.train_max_seq_len, grad_accum_steps=grad_accum_steps)
 ws_schedule = list(args.ws_schedule) + [args.ws_final]
+ws_long = ws_schedule[0]
 for step in range(warmup_steps):
     inputs, targets, cum_seqlens = next(train_loader)
     # each window size is a new graph, need to warm up each with Yarn.attn_scale
@@ -1383,16 +1381,15 @@ for step in range(warmup_steps):
         ws_long = ws_schedule[0]
     else:
         new_ws_long = ws_schedule[ws_idx]
-        if new_ws_long > ws_long:
-            model.yarn.apply(ws_long, new_ws_long)
-            ws_long = new_ws_long
+        model.yarn.apply(ws_long, new_ws_long)
+        ws_long = new_ws_long
     model(inputs, targets, cum_seqlens, ws_long//2, ws_long).backward()
     for opt in optimizers:
         opt.step()
     model.zero_grad(set_to_none=True)
 model.yarn.reset() # rotary buffer is not stored in state_dict
 model.load_state_dict(initial_state["model"])
-optimizer2.reset()
+optimizer2.reset() # muon momentum buffers not in state dict
 for opt, opt_state in zip(optimizers, initial_state["optimizers"]):
     opt.load_state_dict(opt_state)
 del train_loader, initial_state
