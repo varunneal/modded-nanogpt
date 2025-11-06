@@ -29,6 +29,8 @@ import triton
 import triton.language as tl
 from kernels import get_kernel
 from torch import Tensor, nn
+from quack import rmsnorm, cross_entropy# activation
+from quack.mlp import mlp_func as quack_mlp_func
 
 dynamo.config.recompile_limit = 64
 
@@ -721,7 +723,7 @@ class DistAdam(torch.optim.Optimizer):
 # PyTorch nn.Module definitions for the model
 
 def norm(x: Tensor):
-    return F.rms_norm(x, (x.size(-1),))
+    return rmsnorm(x) #F.rms_norm(x, (x.size(-1),))
 
 class CastedLinear(nn.Linear):
     def __init__(self, in_features: int, out_features: int, use_fp8=False, x_s=1.0, w_s=1.0, grad_s=1.0):
@@ -795,7 +797,6 @@ class AttnArgs:
     sa_lambdas: torch.Tensor
     seqlens: torch.Tensor
     bm_size: int
-    do_rope: bool
     cos: torch.Tensor
     sin: torch.Tensor
     attn_scale: float
@@ -840,8 +841,7 @@ class CausalSelfAttention(nn.Module):
 
         q, k, v = F.linear(x, self.qkvo_w.view(4, self.hdim, self.dim)[:3].flatten(end_dim=1).type_as(x)).view(B, T, 3 * self.num_heads, self.head_dim).chunk(3, dim=-2)
         q, k = norm(q), norm(k) # QK norm @Grad62304977
-        if attn_args.do_rope:
-            q, k = rotary(q, cos, sin), rotary(k, cos, sin)
+        q, k = rotary(q, cos, sin), rotary(k, cos, sin)
         if ve is not None:
             v = sa_lambdas[0] * v + sa_lambdas[1] * ve.view_as(v) # @ KoszarskyB & @Grad62304977
         else: # skip mid-layers token value embeddings by @YouJiacheng
@@ -860,10 +860,12 @@ class CausalSelfAttention(nn.Module):
         return y
 
 
-class MLP(nn.Module):
+
+
+class MLP(QuackMLP):
     def __init__(self, dim: int):
-        super().__init__()
         hdim = 4 * dim
+        self.actio
         # make matrices the same shape to enable batched call in optimizer
         self.c_fc = nn.Parameter(torch.empty(dim, hdim))
         self.c_proj = nn.Parameter(torch.empty(dim, hdim))
@@ -880,10 +882,13 @@ class MLP(nn.Module):
             self.c_proj.zero_() # zero init suggested by @Grad62304977
 
     def forward(self, x: Tensor):
-        x = F.linear(x, self.c_fc.T.type_as(x))
-        x = F.relu(x).square() # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
-        x = F.linear(x, self.c_proj.type_as(x))
-        return x
+        return quack_mlp_func(
+            x,
+            self.c_fc.T.weight,
+            self.c_proj.weight,
+            activation="relu_sq" # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
+        )
+
 
 class Block(nn.Module):
     def __init__(self, dim: int, head_dim: int, num_heads: int, layer_idx: int):
@@ -964,9 +969,7 @@ class GPT(nn.Module):
         short_bm = ws_short * args.block_size
         long_bm = ws_long * args.block_size
         bm_sizes = [None, short_bm, short_bm, short_bm, long_bm, short_bm, short_bm, None, short_bm, short_bm, short_bm, long_bm]
-        do_rope = [None, True, True, True, False, True, True, None, True, True, True, True]
         assert len(bm_sizes) == len(self.blocks)
-        assert len(bm_sizes) == len(do_rope)
 
         x = self.embed(input_seq)
 
@@ -994,7 +997,6 @@ class GPT(nn.Module):
                 sa_lambdas=sa_lambdas[i],
                 seqlens=seqlens,
                 bm_size=bm_sizes[i],
-                do_rope=do_rope[i],
                 cos=self.yarn.cos,
                 sin=self.yarn.sin,
                 attn_scale=self.yarn.attn_scale
@@ -1016,7 +1018,7 @@ class GPT(nn.Module):
         # @Grad62304977 added tanh softcapping following Gemma 2 paper, @KoszarskyB reduced it from 30 to 15, @YouJiacheng shifted it by +15 (2*sigmoid(2*x)=tanh(x)+1)
         logits = 30 * torch.sigmoid(logits / 7.5)
         logits_for_loss = logits.float() if not self.training else logits
-        loss = F.cross_entropy(
+        loss = cross_entropy(
             logits_for_loss.view(-1, logits_for_loss.size(-1)),
             target_seq,
             reduction="sum" if self.training else "mean",
@@ -1454,7 +1456,7 @@ for step in range(train_steps + 1):
     # --------------- TRAINING SECTION -----------------
     for _ in range(grad_accum_steps):
         inputs, targets, cum_seqlens = next(train_loader)
-        model(inputs, targets, cum_seqlens, ws_short, ws_long).backward()
+        (model(inputs, targets, cum_seqlens, ws_short, ws_long) / grad_accum_steps).backward()
     step_optimizers(step, optimizers, model)
 
     # logging
