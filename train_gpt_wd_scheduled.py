@@ -425,7 +425,7 @@ class NorMuon(torch.optim.Optimizer):
     Differences from standard Muon:
     - Newton-Shulz is replaced with Polar Express for the orthogonalization step
     - NorMuon adds a low-rank variance estimator similar to Adafactor.
-    - small 1D parameters handled via magnitude normalization of the grad (faster execution than Adam)
+    - "Cautious" weight decay
     - Custom distributed sizing:
     The model stores all attn and mlp weights in the same shape, and then updates the view as
     needed on the forward pass. This enables attn and mlp weights to be contained within the same
@@ -605,7 +605,7 @@ class NorMuon(torch.optim.Optimizer):
             updated_params = torch.empty_like(grad_chunk)
             param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
 
-            # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
+            # Cautious weight decay (https://arxiv.org/abs/2510.12402)
             mask = (v_chunk * param_chunk) >= 0
             v_chunk.addcmul_(param_chunk, (eff_wd * mask).to(ref_param.dtype))
 
@@ -1298,7 +1298,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.2)
+optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.05)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
