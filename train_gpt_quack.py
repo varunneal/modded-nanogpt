@@ -881,20 +881,19 @@ class MLP(nn.Module):
             self.c_fc.uniform_(-bound, bound)
             self.c_proj.zero_() # zero init suggested by @Grad62304977
 
-    def forward(self, x: Tensor):
-        x = F.linear(x, self.c_fc.T.type_as(x))
-        x = F.relu(x).square() # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
-        x = F.linear(x, self.c_proj.type_as(x))
-        return x
-
-
     # def forward(self, x: Tensor):
-    #     return quack_mlp_func(
-    #         x,
-    #         self.c_fc.T,
-    #         self.c_proj,
-    #         activation="relu_sq" # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
-    #     )
+    #     x = F.linear(x, self.c_fc.T.type_as(x))
+    #     x = F.relu(x).square() # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
+    #     x = F.linear(x, self.c_proj.type_as(x))
+    #     return x
+
+    def forward(self, x: Tensor):
+        return quack_mlp_func(
+            x,
+            self.c_fc.T,
+            self.c_proj,
+            activation="relu_sq" # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
+        )
 
 
 class Block(nn.Module):
@@ -1025,7 +1024,7 @@ class GPT(nn.Module):
         # @Grad62304977 added tanh softcapping following Gemma 2 paper, @KoszarskyB reduced it from 30 to 15, @YouJiacheng shifted it by +15 (2*sigmoid(2*x)=tanh(x)+1)
         logits = 30 * torch.sigmoid(logits / 7.5)
         logits_for_loss = logits.float() if not self.training else logits
-        loss = cross_entropy(
+        loss = F.cross_entropy(
             logits_for_loss.view(-1, logits_for_loss.size(-1)),
             target_seq,
             reduction="sum" if self.training else "mean",
@@ -1463,7 +1462,8 @@ for step in range(train_steps + 1):
     # --------------- TRAINING SECTION -----------------
     for _ in range(grad_accum_steps):
         inputs, targets, cum_seqlens = next(train_loader)
-        (model(inputs, targets, cum_seqlens, ws_short, ws_long) / grad_accum_steps).backward()
+        loss = model(inputs, targets, cum_seqlens, ws_short, ws_long) / grad_accum_steps
+        loss.backward()
     step_optimizers(step, optimizers, model)
 
     # logging
