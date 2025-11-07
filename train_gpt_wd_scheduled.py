@@ -1299,7 +1299,7 @@ optimizer1 = DistAdam(
     lr=0.008,
     betas=(0.65, 0.95),
     eps=1e-8,
-    weight_decay=0.01,
+    weight_decay=0.05,
 )
 optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.1)
 optimizers = [optimizer1, optimizer2]
