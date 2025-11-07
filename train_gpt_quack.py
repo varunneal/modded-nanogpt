@@ -859,9 +859,6 @@ class CausalSelfAttention(nn.Module):
         y = F.linear(y, self.qkvo_w.view(4, self.hdim, self.dim)[3].type_as(y))
         return y
 
-
-
-
 class MLP(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
