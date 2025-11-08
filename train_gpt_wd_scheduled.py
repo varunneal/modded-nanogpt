@@ -591,6 +591,12 @@ class NorMuon(torch.optim.Optimizer):
             else:
                 v_chunk = polar_express(updated_grads)
 
+            param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
+
+            # Cautious weight decay (https://arxiv.org/abs/2510.12402)
+            mask = (v_chunk * param_chunk) >= 0
+            v_chunk.addcmul_(param_chunk, (eff_wd * mask).to(ref_param.dtype))
+
             # NorMuon: second_momentum_buffer tracks squared magnitude of gradients along one dim (https://arxiv.org/pdf/2510.05491)
             v_norm = v_chunk.norm(dim=(-2, -1), keepdim=True)
             v_mean = v_chunk.square().mean(dim=-1 if param_shape[-2] >= param_shape[-1] else -2, keepdim=True)
@@ -603,11 +609,8 @@ class NorMuon(torch.optim.Optimizer):
             v_chunk = v_chunk.view(grad_shape)
 
             updated_params = torch.empty_like(grad_chunk)
-            param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
 
-            # Cautious weight decay (https://arxiv.org/abs/2510.12402)
-            mask = (v_chunk * param_chunk) >= 0
-            v_chunk.addcmul_(param_chunk, (eff_wd * mask).to(ref_param.dtype))
+
 
             param_chunk.addcmul_(v_chunk, -eff_lr)
 
@@ -1299,7 +1302,7 @@ optimizer1 = DistAdam(
     lr=0.008,
     betas=(0.65, 0.95),
     eps=1e-8,
-    weight_decay=0.005,
+    weight_decay=0.0,
 )
 optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.1)
 optimizers = [optimizer1, optimizer2]
