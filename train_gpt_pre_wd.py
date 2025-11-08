@@ -425,7 +425,7 @@ class NorMuon(torch.optim.Optimizer):
     Differences from standard Muon:
     - Newton-Shulz is replaced with Polar Express for the orthogonalization step
     - NorMuon adds a low-rank variance estimator similar to Adafactor.
-    - "Cautious" weight decay
+    - small 1D parameters handled via magnitude normalization of the grad (faster execution than Adam)
     - Custom distributed sizing:
     The model stores all attn and mlp weights in the same shape, and then updates the view as
     needed on the forward pass. This enables attn and mlp weights to be contained within the same
@@ -583,15 +583,13 @@ class NorMuon(torch.optim.Optimizer):
 
             # Determine LR and WR
             eff_lr = group["lr"] * group["param_lr"]
-            eff_wd = group["lr"] * group["weight_decay"] * group["param_wd"]
+            eff_wd = group["weight_decay"] * group["param_wd"]
 
             # Compute zeropower for the entire chunk in a single, batched call.
             if num_params == 0:
                 v_chunk = updated_grads
             else:
                 v_chunk = polar_express(updated_grads)
-
-            param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
 
             # NorMuon: second_momentum_buffer tracks squared magnitude of gradients along one dim (https://arxiv.org/pdf/2510.05491)
             v_norm = v_chunk.norm(dim=(-2, -1), keepdim=True)
@@ -604,12 +602,12 @@ class NorMuon(torch.optim.Optimizer):
 
             v_chunk = v_chunk.view(grad_shape)
 
-            # Cautious weight decay (https://arxiv.org/abs/2510.12402)
-            mask = (v_chunk * param_chunk) >= 0
-            v_chunk.addcmul_(param_chunk, (eff_wd * mask).to(ref_param.dtype))
-
             updated_params = torch.empty_like(grad_chunk)
-            param_chunk.addcmul_(v_chunk, -eff_lr)
+            param_chunk = torch.stack(params[module_idx:module_idx + num_params]) if num_params > 0 else torch.zeros_like(v_chunk)
+            # Apply weight decay directly to the buffer.
+            param_chunk.mul_(1 - eff_wd)
+
+            param_chunk.add_(-eff_lr * v_chunk)
 
             updated_params[:num_params].copy_(param_chunk)
             if num_params < chunk_size:
@@ -684,14 +682,13 @@ class DistAdam(torch.optim.Optimizer):
         for group in self.param_groups:
             beta1, beta2 = group['betas']
             eps = group['eps']
-            # wd = group['weight_decay']
+            wd = group['weight_decay']
             params = group['params']
             for param in params:
                 reduce_scatter_futures[idx].wait()
                 rank_size = param.shape[0] // self.world_size
                 p_slice = param[rank * rank_size:(rank + 1) * rank_size]
                 lr = group['lr'] * getattr(param, "lr_mul", 1.0)
-                eff_wd = group["lr"] * group["weight_decay"] * getattr(param, "wd_mul", 1.0)
                 state = self.state[param]
                 g_slice = grad_slices[idx]
 
@@ -699,7 +696,10 @@ class DistAdam(torch.optim.Optimizer):
                 exp_avg_sq = state["exp_avg_sq"]
                 state["step"] += 1
                 t = state["step"]
-
+                # weight decay
+                if wd != 0:
+                    eff_weight_decay = lr * wd * getattr(param, "wd_mul", 1.0)
+                    p_slice.mul_(1 - eff_weight_decay)
                 # update running averages
                 exp_avg.mul_(beta1).add_(g_slice, alpha=1 - beta1)
                 exp_avg_sq.mul_(beta2).addcmul_(g_slice, g_slice, value=1 - beta2)
@@ -709,13 +709,8 @@ class DistAdam(torch.optim.Optimizer):
                 # compute step
                 denom = exp_avg_sq.sqrt().add_(eps)
                 step_size = lr * (bias2 ** 0.5 / bias1)
-                update = exp_avg.div(denom)
-
-                # cautious weight decay
-                mask = (p_slice * exp_avg) >= 0
-                update.addcmul_(p_slice, mask.to(update.dtype), value=eff_wd)
-
-                p_slice.add_(other=update, alpha=-step_size)
+                update = exp_avg.div(denom).mul_(step_size)
+                p_slice.add_(other=update, alpha=-1.0)
                 idx += 1
                 all_gather_futures.append(dist.all_gather_into_tensor(param, p_slice, async_op=True).get_future())
         torch.futures.collect_all(all_gather_futures).wait()
@@ -1247,7 +1242,7 @@ logfile = None
 if master_process:
     run_id = args.run_id
     os.makedirs("logs", exist_ok=True)
-    logfile = f"logs/wd_{run_id}.txt"
+    logfile = f"logs/pre_wd_{run_id}.txt"
     print(logfile)
 def print0(s, console=False):
     if master_process:
@@ -1301,21 +1296,20 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.2)
+optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.0)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
         group["initial_lr"] = group["lr"]
 
 # learning rate schedule: flat, then linear decay, then flat
-def get_lr(step: int, lr_min=0.1):
-    if step >= args.num_scheduled_iterations:
-        return lr_min
-    x = step / args.num_scheduled_iterations
+def get_lr(step: int):
+    x = min(0.9999, step / args.num_scheduled_iterations)
+    assert 0 <= x < 1
     lr = 1.0
     if x >= 1 - args.cooldown_frac:
         w = (1 - x) / args.cooldown_frac
-        lr = w * 1.0 + (1 - w) * lr_min
+        lr = w * 1.0 + (1 - w) * 0.1
     return lr
 
 def get_ws(step: int):
@@ -1324,6 +1318,7 @@ def get_ws(step: int):
     if step >= args.num_scheduled_iterations:
         return args.ws_final // 2, args.ws_final
     x = step / args.num_scheduled_iterations
+    assert 0 <= x < 1
     ws_idx = int(len(args.ws_schedule) * x)
     return args.ws_schedule[ws_idx] // 2, args.ws_schedule[ws_idx]
 
@@ -1452,7 +1447,7 @@ for step in range(train_steps + 1):
     # --------------- TRAINING SECTION -----------------
     for _ in range(grad_accum_steps):
         inputs, targets, cum_seqlens = next(train_loader)
-        (model(inputs, targets, cum_seqlens, ws_short, ws_long) / grad_accum_steps).backward()
+        model(inputs, targets, cum_seqlens, ws_short, ws_long).backward()
     step_optimizers(step, optimizers, model)
 
     # logging
