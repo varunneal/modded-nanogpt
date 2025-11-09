@@ -684,14 +684,13 @@ class DistAdam(torch.optim.Optimizer):
         for group in self.param_groups:
             beta1, beta2 = group['betas']
             eps = group['eps']
-            # wd = group['weight_decay']
+            wd = group['weight_decay']
             params = group['params']
             for param in params:
                 reduce_scatter_futures[idx].wait()
                 rank_size = param.shape[0] // self.world_size
                 p_slice = param[rank * rank_size:(rank + 1) * rank_size]
                 lr = group['lr'] * getattr(param, "lr_mul", 1.0)
-                eff_wd = group["lr"] * group["weight_decay"] * getattr(param, "wd_mul", 1.0)
                 state = self.state[param]
                 g_slice = grad_slices[idx]
 
@@ -699,7 +698,10 @@ class DistAdam(torch.optim.Optimizer):
                 exp_avg_sq = state["exp_avg_sq"]
                 state["step"] += 1
                 t = state["step"]
-
+                # weight decay
+                if wd != 0:
+                    eff_weight_decay = lr * wd * getattr(param, "wd_mul", 1.0)
+                    p_slice.mul_(1 - eff_weight_decay)
                 # update running averages
                 exp_avg.mul_(beta1).add_(g_slice, alpha=1 - beta1)
                 exp_avg_sq.mul_(beta2).addcmul_(g_slice, g_slice, value=1 - beta2)
@@ -709,13 +711,8 @@ class DistAdam(torch.optim.Optimizer):
                 # compute step
                 denom = exp_avg_sq.sqrt().add_(eps)
                 step_size = lr * (bias2 ** 0.5 / bias1)
-                update = exp_avg.div(denom)
-
-                # cautious weight decay
-                mask = (p_slice * exp_avg) >= 0
-                update.addcmul_(p_slice, mask.to(update.dtype), value=eff_wd)
-
-                p_slice.add_(other=update, alpha=-step_size)
+                update = exp_avg.div(denom).mul_(step_size)
+                p_slice.add_(other=update, alpha=-1.0)
                 idx += 1
                 all_gather_futures.append(dist.all_gather_into_tensor(param, p_slice, async_op=True).get_future())
         torch.futures.collect_all(all_gather_futures).wait()
@@ -1301,7 +1298,7 @@ optimizer1 = DistAdam(
     eps=1e-8,
     weight_decay=0.0,
 )
-optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.2)
+optimizer2 = NorMuon(hidden_matrix_params + gate_params, lr=0.03, momentum=0.95, beta2=0.95, weight_decay=0.1)
 optimizers = [optimizer1, optimizer2]
 for opt in optimizers:
     for group in opt.param_groups:
