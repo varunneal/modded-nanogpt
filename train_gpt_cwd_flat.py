@@ -583,7 +583,7 @@ class NorMuon(torch.optim.Optimizer):
 
             # Determine LR and WR
             eff_lr = group["lr"] * group["param_lr"]
-            eff_wd = group["lr"] * group["weight_decay"] * group["param_wd"]
+            eff_wd = group["weight_decay"] * group["param_wd"]
 
             # Compute zeropower for the entire chunk in a single, batched call.
             if num_params == 0:
