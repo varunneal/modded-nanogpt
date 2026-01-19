@@ -1,5 +1,5 @@
 """
-parent: experiments/pr191-misc/record61-refactor.py
+parent: experiments/records/record61.py
 kernels: experiments/records/record61_kernels.py
 """
 import os
@@ -48,7 +48,6 @@ rank = int(os.environ["RANK"])
 world_size = int(os.environ["WORLD_SIZE"])
 assert 8 % world_size == 0, "world_size must be a divisor of 8"
 grad_accum_steps = 8 // world_size
-grad_scale = (2 ** 16) / grad_accum_steps
 assert torch.cuda.is_available()
 device = torch.device("cuda", int(os.environ["LOCAL_RANK"]))
 torch.cuda.set_device(device)
@@ -1109,7 +1108,7 @@ class GPT(nn.Module):
         # suggested to me by @Grad62304977. this originates from Karpathy's experiments.
         use_fp8 = not os.environ.get("DISABLE_FP8", False)
         # Transposed weight storage for faster gradient accumulation
-        self.lm_head = CastedLinearT(model_dim, vocab_size, use_fp8=use_fp8, x_s=100/448, w_s=1.6/448, grad_s=0.75/448 * grad_scale)
+        self.lm_head = CastedLinearT(model_dim, vocab_size, use_fp8=use_fp8, x_s=100/448, w_s=1.6/448, grad_s=0.75/448)
 
         nn.init.normal_(self.lm_head.weight, mean=0, std=0.005)
         self.lm_head.weight.label = 'lm_head'
@@ -1714,7 +1713,7 @@ val_loader = distributed_data_generator(args.val_files, args.val_batch_size, -1,
 
 transition_steps = training_manager.get_transition_steps()
 # first few steps plus transitions
-warmup_steps = sorted({0, 1, 2} | set(s + offset for s in transition_steps for offset in [-2, -1, 0, 1, 2] if s + offset >= 0))
+warmup_steps = sorted({0, 1, 2} | set(s + offset for s in transition_steps for offset in [-1, 0, 1] if s + offset >= 0))
 print0(f"Sampling steps {warmup_steps} for warmup", console=True)
 for step in warmup_steps:
     training_manager.advance_schedule(step)
@@ -1726,7 +1725,7 @@ for step in warmup_steps:
     for idx in range(grad_accum_steps):
         send_args = training_manager.train_loader_send_args
         inputs, targets, cum_seqlens = train_loader.send(send_args)
-        (model(inputs, targets, cum_seqlens, training_manager.get_forward_args()) * grad_scale).backward()
+        (model(inputs, targets, cum_seqlens, training_manager.get_forward_args()) / grad_accum_steps).backward()
     training_manager.step_optimizers(step)
 print0("Resetting Model", console=True)
 model.zero_grad(set_to_none=True)
@@ -1787,7 +1786,7 @@ for step in range(train_steps + 1):
     # --------------- TRAINING SECTION -----------------
     for idx in range(grad_accum_steps):
         inputs, targets, cum_seqlens = train_loader.send(training_manager.train_loader_send_args)
-        (model(inputs, targets, cum_seqlens, training_manager.get_forward_args()) * grad_scale).backward()
+        (model(inputs, targets, cum_seqlens, training_manager.get_forward_args()) / grad_accum_steps).backward()
     training_manager.step_optimizers(step)
 
     # logging
