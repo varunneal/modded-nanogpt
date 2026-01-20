@@ -510,12 +510,14 @@ class NorMuonAndAdam:
     def copy_lm_state_to_embed(self):
         """
         Copy the optimizer state from the lm_head to the embed at the untie point.
-        This requires an all-gather + reshard because of different sharding:
-        - lm_head (768, 50304) is sharded to (96, 50304) per rank (along model_dim)
-        - embed (50304, 768) is sharded to (6288, 768) per rank (along vocab_size)
+        This requires an all-gather + reshard because of different sharding.
 
-        We all-gather the lm_head momentum, transpose it, then each rank takes their
-        embed shard to get the correct momentum state.
+        With flattened Adam state:
+        - lm_head (768, 50304) state is flattened to (numel // world_size,) per rank
+        - embed (50304, 768) state is flattened to (numel // world_size,) per rank
+
+        We all-gather the flattened lm_head state, reshape to lm_head shape,
+        transpose to embed shape, flatten, then each rank takes their shard.
         """
         lm_head = self._lm_head_param
         embed = self._embed_param
@@ -525,21 +527,23 @@ class NorMuonAndAdam:
 
         embed_state['step'] = lm_state['step'] # Preserve step count for bias correction
 
-        # Copy optimizer state with all-gather + transpose + reshard
+        # Copy optimizer state with all-gather + reshape + transpose + reshard
         if self.world_size > 1:
             rank = dist.get_rank()
-            embed_chunk_size = embed_cfg.chunk_size  # 6288
+            embed_chunk_size = embed_cfg.chunk_size
 
-            # All-gather lm_head momentum to get full (768, 50304) tensor
             for key in ["exp_avg", "exp_avg_sq"]:
-                lm_chunk = lm_state[key]  # (96, 50304)
-                full_lm = torch.empty(lm_head.shape[0], lm_head.shape[1], dtype=lm_chunk.dtype, device=lm_chunk.device)
-                dist.all_gather_into_tensor(full_lm, lm_chunk.contiguous())
-                embed_state[key].copy_(full_lm.T[rank * embed_chunk_size:(rank + 1) * embed_chunk_size])
+                lm_chunk = lm_state[key]  # flattened (chunk_size,)
+                # All-gather into flattened buffer
+                full_lm_flat = torch.empty(lm_head.numel(), dtype=lm_chunk.dtype, device=lm_chunk.device)
+                dist.all_gather_into_tensor(full_lm_flat, lm_chunk.contiguous())
+                # Reshape to lm_head shape, transpose to embed shape, flatten, take shard
+                full_embed_flat = full_lm_flat.view(lm_head.shape).T.contiguous().view(-1)
+                embed_state[key].copy_(full_embed_flat[rank * embed_chunk_size:(rank + 1) * embed_chunk_size])
         else:
-            # Single GPU: simple transpose
+            # Single GPU: reshape, transpose, flatten
             for key in ["exp_avg", "exp_avg_sq"]:
-                embed_state[key].copy_(lm_state[key].T)
+                embed_state[key].copy_(lm_state[key].view(lm_head.shape).T.contiguous().view(-1))
 
         # Mark as split
         self.split_embed = True
