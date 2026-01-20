@@ -346,7 +346,7 @@ class NorMuonAndAdam:
         wd_mul = table_entry.get("wd_mul", 1.0)
 
         if optim == "adam":
-            chunk_size = param.numel() // self.world_size if comms == "sharded" else None
+            chunk_size = param.shape[0] // self.world_size if comms == "sharded" else None
             p_cfg = ParamConfig(
                 label=label,
                 optim=optim,
@@ -411,7 +411,7 @@ class NorMuonAndAdam:
             if p_cfg.optim == "adam":
                 # Sharded params use chunk state, replicated use full state
                 if p_cfg.comms == "sharded":
-                    chunk = param.view(-1)[:p_cfg.chunk_size]  # Flatten to 1d
+                    chunk = param[:p_cfg.chunk_size]
                 else:
                     chunk = param
                 exp_avg = torch.zeros_like(chunk, dtype=torch.float32, device=param.device)
@@ -474,10 +474,10 @@ class NorMuonAndAdam:
                 ).get_future()
                 self._reduce_futures[param] = (future, grad_chunk)
             else:
-                # Adam: flatten and reduce_scatter
-                grad_chunk = grad.new_empty(p_cfg.chunk_size)
+                # Adam: simple reduce_scatter
+                grad_chunk = torch.empty_like(grad[:p_cfg.chunk_size])
                 future = dist.reduce_scatter_tensor(
-                    grad_chunk, grad.view(-1), op=dist.ReduceOp.AVG, async_op=True
+                    grad_chunk, grad, op=dist.ReduceOp.AVG, async_op=True
                 ).get_future()
                 self._reduce_futures[param] = (future, grad_chunk)
 
@@ -492,7 +492,7 @@ class NorMuonAndAdam:
             ).get_future()
         else:
             return dist.all_gather_into_tensor(
-                param.view(-1), p_slice.contiguous(), async_op=True
+                param, p_slice.contiguous(), async_op=True
             ).get_future()
 
     # -----------------------------------
@@ -522,6 +522,7 @@ class NorMuonAndAdam:
         embed = self._embed_param
         lm_state = self.param_states[lm_head]
         embed_state = self.param_states[embed]
+        lm_cfg = self.param_cfgs[lm_head]
         embed_cfg = self.param_cfgs[embed]
 
         embed_state['step'] = lm_state['step'] # Preserve step count for bias correction
@@ -529,6 +530,7 @@ class NorMuonAndAdam:
         # Copy optimizer state with all-gather + transpose + reshard
         if self.world_size > 1:
             rank = dist.get_rank()
+            lm_chunk_size = lm_cfg.chunk_size  # 96
             embed_chunk_size = embed_cfg.chunk_size  # 6288
 
             # All-gather lm_head momentum to get full (768, 50304) tensor
@@ -675,7 +677,7 @@ class NorMuonAndAdam:
 
         # Get parameter slice
         if p_cfg.comms == "sharded":
-            p_slice = param.view(-1)[rank * p_cfg.chunk_size:(rank + 1) * p_cfg.chunk_size]
+            p_slice = param[rank * p_cfg.chunk_size:(rank + 1) * p_cfg.chunk_size]
         else:
             p_slice = param
 
@@ -1025,6 +1027,7 @@ class GPT(nn.Module):
         super().__init__()
         self.num_layers = num_layers
         vocab_size = next_multiple_of_n(vocab_size, n=128)
+        self.vocab_size = vocab_size
 
         self.smear_gate = nn.Linear(12, 1, bias=False)
         nn.init.zeros_(self.smear_gate.weight)
@@ -1036,7 +1039,7 @@ class GPT(nn.Module):
 
         # token value embeddings by @KoszarskyB - inspired by @Grad62304977's value residual implementation following https://arxiv.org/abs/2410.17897
         # value embedding code simplification inspired by @ragulpr https://github.com/KellerJordan/modded-nanogpt/pull/78
-        self.value_embeds = nn.Parameter(torch.zeros(3, vocab_size, model_dim, dtype=torch.bfloat16))
+        self.value_embeds = nn.Parameter(torch.zeros(3 * vocab_size, model_dim, dtype=torch.bfloat16))
         self.value_embeds.label = 'value_embed'
 
         # parameter banks for attention and value embedding gate weights
@@ -1168,7 +1171,7 @@ class GPT(nn.Module):
         x = self.embed(input_seq)
 
         # Value embeddings - always computed (not precomputed)
-        ve = self.value_embeds[:, input_seq]
+        ve = self.value_embeds.view(3, self.vocab_size, -1)[:, input_seq]
         # 012 ... 012 structure on token value embeddings by @YouJiacheng, improved on @leloykun's U-net structure
         # dropping first layer updates this to .12 ... 012
         ve = [ve[1], ve[2]] + [None] * (self.num_layers - 5) + [ve[0], ve[1], ve[2]]
