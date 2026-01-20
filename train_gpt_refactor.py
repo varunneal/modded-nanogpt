@@ -345,7 +345,7 @@ class NorMuonAndAdam:
         wd_mul = table_entry.get("wd_mul", 1.0)
 
         if optim == "adam":
-            chunk_size = param.numel() // self.world_size if comms == "sharded" else None
+            chunk_size = param.shape[0] // self.world_size if comms == "sharded" else None
             p_cfg = ParamConfig(
                 label=label,
                 optim=optim,
@@ -410,7 +410,7 @@ class NorMuonAndAdam:
             if p_cfg.optim == "adam":
                 # Sharded params use chunk state, replicated use full state
                 if p_cfg.comms == "sharded":
-                    chunk = param.view(-1)[:p_cfg.chunk_size]  # Flatten to 1d
+                    chunk = param[:p_cfg.chunk_size]
                 else:
                     chunk = param
                 exp_avg = torch.zeros_like(chunk, dtype=torch.float32, device=param.device)
@@ -473,10 +473,10 @@ class NorMuonAndAdam:
                 ).get_future()
                 self._reduce_futures[param] = (future, grad_chunk)
             else:
-                # Adam: flatten and reduce_scatter
-                grad_chunk = grad.new_empty(p_cfg.chunk_size)
+                # Adam: simple reduce_scatter
+                grad_chunk = torch.empty_like(grad[:p_cfg.chunk_size])
                 future = dist.reduce_scatter_tensor(
-                    grad_chunk, grad.view(-1), op=dist.ReduceOp.AVG, async_op=True
+                    grad_chunk, grad, op=dist.ReduceOp.AVG, async_op=True
                 ).get_future()
                 self._reduce_futures[param] = (future, grad_chunk)
 
@@ -491,7 +491,7 @@ class NorMuonAndAdam:
             ).get_future()
         else:
             return dist.all_gather_into_tensor(
-                param.view(-1), p_slice.contiguous(), async_op=True
+                param, p_slice.contiguous(), async_op=True
             ).get_future()
 
     # -----------------------------------
@@ -510,40 +510,38 @@ class NorMuonAndAdam:
     def copy_lm_state_to_embed(self):
         """
         Copy the optimizer state from the lm_head to the embed at the untie point.
-        This requires an all-gather + reshard because of different sharding.
+        This requires an all-gather + reshard because of different sharding:
+        - lm_head (768, 50304) is sharded to (96, 50304) per rank (along model_dim)
+        - embed (50304, 768) is sharded to (6288, 768) per rank (along vocab_size)
 
-        With flattened Adam state:
-        - lm_head (768, 50304) state is flattened to (numel // world_size,) per rank
-        - embed (50304, 768) state is flattened to (numel // world_size,) per rank
-
-        We all-gather the flattened lm_head state, reshape to lm_head shape,
-        transpose to embed shape, flatten, then each rank takes their shard.
+        We all-gather the lm_head momentum, transpose it, then each rank takes their
+        embed shard to get the correct momentum state.
         """
         lm_head = self._lm_head_param
         embed = self._embed_param
         lm_state = self.param_states[lm_head]
         embed_state = self.param_states[embed]
+        lm_cfg = self.param_cfgs[lm_head]
         embed_cfg = self.param_cfgs[embed]
 
         embed_state['step'] = lm_state['step'] # Preserve step count for bias correction
 
-        # Copy optimizer state with all-gather + reshape + transpose + reshard
+        # Copy optimizer state with all-gather + transpose + reshard
         if self.world_size > 1:
             rank = dist.get_rank()
-            embed_chunk_size = embed_cfg.chunk_size
+            lm_chunk_size = lm_cfg.chunk_size  # 96
+            embed_chunk_size = embed_cfg.chunk_size  # 6288
 
+            # All-gather lm_head momentum to get full (768, 50304) tensor
             for key in ["exp_avg", "exp_avg_sq"]:
-                lm_chunk = lm_state[key]  # flattened (chunk_size,)
-                # All-gather into flattened buffer
-                full_lm_flat = torch.empty(lm_head.numel(), dtype=lm_chunk.dtype, device=lm_chunk.device)
-                dist.all_gather_into_tensor(full_lm_flat, lm_chunk.contiguous())
-                # Reshape to lm_head shape, transpose to embed shape, flatten, take shard
-                full_embed_flat = full_lm_flat.view(lm_head.shape).T.contiguous().view(-1)
-                embed_state[key].copy_(full_embed_flat[rank * embed_chunk_size:(rank + 1) * embed_chunk_size])
+                lm_chunk = lm_state[key]  # (96, 50304)
+                full_lm = torch.empty(lm_head.shape[0], lm_head.shape[1], dtype=lm_chunk.dtype, device=lm_chunk.device)
+                dist.all_gather_into_tensor(full_lm, lm_chunk.contiguous())
+                embed_state[key].copy_(full_lm.T[rank * embed_chunk_size:(rank + 1) * embed_chunk_size])
         else:
-            # Single GPU: reshape, transpose, flatten
+            # Single GPU: simple transpose
             for key in ["exp_avg", "exp_avg_sq"]:
-                embed_state[key].copy_(lm_state[key].view(lm_head.shape).T.contiguous().view(-1))
+                embed_state[key].copy_(lm_state[key].T)
 
         # Mark as split
         self.split_embed = True
@@ -678,7 +676,7 @@ class NorMuonAndAdam:
 
         # Get parameter slice
         if p_cfg.comms == "sharded":
-            p_slice = param.view(-1)[rank * p_cfg.chunk_size:(rank + 1) * p_cfg.chunk_size]
+            p_slice = param[rank * p_cfg.chunk_size:(rank + 1) * p_cfg.chunk_size]
         else:
             p_slice = param
 
