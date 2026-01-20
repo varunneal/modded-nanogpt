@@ -1026,6 +1026,7 @@ class GPT(nn.Module):
         super().__init__()
         self.num_layers = num_layers
         vocab_size = next_multiple_of_n(vocab_size, n=128)
+        self.vocab_size = vocab_size
 
         self.smear_gate = nn.Linear(12, 1, bias=False)
         nn.init.zeros_(self.smear_gate.weight)
@@ -1037,7 +1038,7 @@ class GPT(nn.Module):
 
         # token value embeddings by @KoszarskyB - inspired by @Grad62304977's value residual implementation following https://arxiv.org/abs/2410.17897
         # value embedding code simplification inspired by @ragulpr https://github.com/KellerJordan/modded-nanogpt/pull/78
-        self.value_embeds = nn.Parameter(torch.zeros(3, vocab_size, model_dim, dtype=torch.bfloat16))
+        self.value_embeds = nn.Parameter(torch.zeros(3 * vocab_size, model_dim, dtype=torch.bfloat16))
         self.value_embeds.label = 'value_embed'
 
         # parameter banks for attention and value embedding gate weights
@@ -1169,7 +1170,7 @@ class GPT(nn.Module):
         x = self.embed(input_seq)
 
         # Value embeddings - always computed (not precomputed)
-        ve = self.value_embeds[:, input_seq]
+        ve = self.value_embeds.view(3, self.vocab_size, -1)[:, input_seq]
         # 012 ... 012 structure on token value embeddings by @YouJiacheng, improved on @leloykun's U-net structure
         # dropping first layer updates this to .12 ... 012
         ve = [ve[1], ve[2]] + [None] * (self.num_layers - 5) + [ve[0], ve[1], ve[2]]
